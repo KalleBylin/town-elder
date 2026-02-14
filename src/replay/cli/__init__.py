@@ -24,6 +24,11 @@ app = typer.Typer(
 console = Console(stderr=True)
 
 
+def _escape_rich(text: str) -> str:
+    """Escape brackets to prevent Rich markup interpretation."""
+    return text.replace("[", "\\[").replace("]", "\\]")
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
     """replay - Semantic memory for AI agents.
@@ -78,14 +83,14 @@ def init(
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
     except PermissionError as e:
-        console.print(f"[red]Error: Cannot create directory: {e}[/red]")
+        console.print(f"[red]Error: Cannot create directory:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
         store = ZvecStore(data_dir / "vectors")
         store.close()
     except Exception as e:
-        console.print(f"[red]Error initializing storage: {e}[/red]")
+        console.print(f"[red]Error initializing storage:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
     console.print(f"[green]Initialized replay database at {data_dir}[/green]")
@@ -119,7 +124,7 @@ def search(
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
-        console.print(f"[red]Error opening storage: {e}[/red]")
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
@@ -129,7 +134,7 @@ def search(
         # Search
         results = store.search(query_vector, top_k=top_k)
     except Exception as e:
-        console.print(f"[red]Error during search: {e}[/red]")
+        console.print(f"[red]Error during search:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
     finally:
         store.close()
@@ -141,7 +146,9 @@ def search(
     console.print(f"[bold]Search results for:[/bold] {query}")
     for i, result in enumerate(results, 1):
         console.print(f"\n[bold]{i}.[/bold] Score: {result['score']:.3f}")
-        console.print(f"   {result['text'][:200]}...")
+        # Escape brackets in text to avoid Rich markup interpretation
+        text_snippet = result["text"][:200].replace("[", "\\[").replace("]", "\\]")
+        console.print(f"   {text_snippet}...")
 
 
 @app.command()
@@ -188,7 +195,7 @@ def add(
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
-        console.print(f"[red]Error opening storage: {e}[/red]")
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
@@ -199,7 +206,7 @@ def add(
         # Store
         store.insert_with_vector(doc_id, vector, text, meta)
     except Exception as e:
-        console.print(f"[red]Error storing document: {e}[/red]")
+        console.print(f"[red]Error storing document:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
     finally:
         store.close()
@@ -225,20 +232,22 @@ def stats() -> None:
         services = get_service_factory()
         store = services.create_vector_store()
     except Exception as e:
-        console.print(f"[red]Error opening storage: {e}[/red]")
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
         count = store.count()
     except Exception as e:
-        console.print(f"[red]Error getting stats: {e}[/red]")
+        console.print(f"[red]Error getting stats:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
     finally:
         store.close()
 
     console.print(f"[bold]Replay Statistics[/bold]")
     console.print(f"  Documents: {count}")
-    console.print(f"  Data directory: {config.data_dir}")
+    # Escape brackets in path to avoid Rich markup interpretation
+    data_dir_str = str(config.data_dir).replace("[", "\\[").replace("]", "\\]")
+    console.print(f"  Data directory: {data_dir_str}")
     console.print(f"  Embedding model: {config.embed_model}")
 
 
@@ -274,7 +283,7 @@ def index(
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
-        console.print(f"[red]Error opening storage: {e}[/red]")
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
     # Find all text files
@@ -295,7 +304,7 @@ def index(
             except Exception as e:
                 console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
     except Exception as e:
-        console.print(f"[red]Error during indexing: {e}[/red]")
+        console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
     finally:
         store.close()
@@ -346,14 +355,14 @@ def commit_index(
         store = services.create_vector_store()
         diff_parser = services.create_diff_parser()
     except Exception as e:
-        console.print(f"[red]Error initializing services: {e}[/red]")
+        console.print(f"[red]Error initializing services:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
         # Get commits
         commits = git.get_commits(limit=limit)
     except Exception as e:
-        console.print(f"[red]Error fetching commits: {e}[/red]")
+        console.print(f"[red]Error fetching commits:[/red] {_escape_rich(str(e))}")
         store.close()
         raise typer.Exit(code=EXIT_ERROR)
 
@@ -384,7 +393,7 @@ def commit_index(
             except Exception as e:
                 console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
     except Exception as e:
-        console.print(f"[red]Error during indexing: {e}[/red]")
+        console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
     finally:
         store.close()
