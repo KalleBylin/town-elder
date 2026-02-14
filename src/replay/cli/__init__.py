@@ -379,7 +379,7 @@ def commit_index(
                 text = f"Commit: {commit.message}\n\n{diff_text}"
 
                 # Index
-                doc_id = f"commit:{commit.hash}"
+                doc_id = f"commit_{commit.hash}"
                 vector = embedder.embed_single(text)
                 store.insert_with_vector(
                     doc_id, vector, text,

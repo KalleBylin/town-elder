@@ -61,10 +61,11 @@ class ZvecStore:
 
     def insert(self, text: str, metadata: dict[str, Any]) -> str:
         """Insert a document with embedding."""
+        import uuid
         import zvec
         import json
 
-        doc_id = metadata.get("id", str(hash(text)))
+        doc_id = metadata.get("id", str(uuid.uuid4()))
         vector = np.zeros(self.dimension, dtype=np.float32)
         self._get_collection().insert(
             zvec.Doc(
@@ -126,10 +127,10 @@ class ZvecStore:
         import json
         collection = self._get_collection()
         try:
-            # Use fetch to get by ID
+            # Use fetch to get by ID - returns a dict, not a list
             docs = collection.fetch(ids=[doc_id])
-            if docs:
-                doc = docs[0]
+            if doc_id in docs:
+                doc = docs[doc_id]
                 return {
                     "text": doc.fields.get("text", ""),
                     "metadata": json.loads(doc.fields.get("metadata", "{}")),
