@@ -49,12 +49,13 @@ class GitRunner:
         )
         return result.stdout.strip()
 
-    def get_commits(self, since: str | None = None, limit: int = 100) -> list[Commit]:
+    def get_commits(self, since: str | None = None, limit: int = 100, offset: int = 0) -> list[Commit]:
         """Get commits from the repository.
 
         Args:
             since: Get commits after this date/hash (optional).
             limit: Maximum number of commits to return (default 100).
+            offset: Number of commits to skip (default 0).
 
         Returns:
             List of Commit objects.
@@ -62,6 +63,8 @@ class GitRunner:
         args = ["log", "-n", str(limit), "--format=%H|||%s|||%an|||%ad|||%f", "--date=iso"]
         if since:
             args.extend([f"--since={since}"])
+        if offset > 0:
+            args.extend([f"--skip={offset}"])
 
         output = self._run_git(args)
         commits = []

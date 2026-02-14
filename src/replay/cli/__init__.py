@@ -75,10 +75,17 @@ def init(
         "-f",
         help="Overwrite existing database if it already exists",
     ),
+    install_hook: bool = typer.Option(
+        False,
+        "--install-hook",
+        "-h",
+        help="Also install post-commit hook for automatic indexing",
+    ),
 ) -> None:
     """Initialize a replay database in the specified directory.
 
     Creates a hidden .replay directory with vector storage.
+    Optionally installs a post-commit hook for automatic commit indexing.
     """
     from replay.storage import ZvecStore
 
@@ -114,7 +121,38 @@ def init(
         raise typer.Exit(code=EXIT_ERROR)
 
     console.print(f"[green]Initialized replay database at {data_dir}[/green]")
+
+    # Optionally install hook
+    if install_hook:
+        git_dir = init_path / ".git"
+        if not git_dir.exists():
+            console.print("[yellow]Warning: Not a git repository, skipping hook installation[/yellow]")
+        else:
+            try:
+                import os
+                hooks_dir = git_dir / "hooks"
+                hook_path = hooks_dir / "post-commit"
+
+                hooks_dir.mkdir(parents=True, exist_ok=True)
+
+                # Check if hook already exists
+                if hook_path.exists():
+                    console.print("[yellow]Warning: Hook already exists, skipping. Use 'replay hook install --force' to overwrite[/yellow]")
+                else:
+                    # Use absolute path for data_dir
+                    hook_content = f"""#!/bin/sh
+# Replay post-commit hook - automatically indexes commits
+replay --data-dir {data_dir} commit-index --repo "$(git rev-parse --show-toplevel)"
+"""
+                    hook_path.write_text(hook_content)
+                    os.chmod(hook_path, 0o755)
+                    console.print(f"[green]Installed post-commit hook at {hook_path}[/green]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not install hook: {e}[/yellow]")
+
     console.print("[dim]You can now use 'replay add' to add documents[/dim]")
+    if not install_hook:
+        console.print("[dim]Run 'replay init --install-hook' to enable automatic commit indexing[/dim]")
 
 
 @app.command()
@@ -125,6 +163,21 @@ def search(
         "--top-k",
         "-k",
         help="Number of results to return (default: 5)",
+    ),
+    author: str | None = typer.Option(
+        None,
+        "--author",
+        help="Filter results by author (not yet implemented)",
+    ),
+    path: str | None = typer.Option(
+        None,
+        "--path",
+        help="Filter results by file path (not yet implemented)",
+    ),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="Filter results by date (not yet implemented)",
     ),
 ) -> None:
     """Search for similar documents in the vector store.
@@ -169,6 +222,39 @@ def search(
         # Escape brackets in text to avoid Rich markup interpretation
         text_snippet = result["text"][:200].replace("[", "\\[").replace("]", "\\]")
         console.print(f"   {text_snippet}...")
+
+
+@app.command("query")
+def query(
+    query: str = typer.Argument(..., help="Search query text"),
+    top_k: int = typer.Option(
+        5,
+        "--top-k",
+        "-k",
+        help="Number of results to return (default: 5)",
+    ),
+    author: str | None = typer.Option(
+        None,
+        "--author",
+        help="Filter results by author (not yet implemented)",
+    ),
+    path: str | None = typer.Option(
+        None,
+        "--path",
+        help="Filter results by file path (not yet implemented)",
+    ),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="Filter results by date (not yet implemented)",
+    ),
+) -> None:
+    """Query for similar documents in the vector store.
+
+    Alias for 'search' command. Embeds the query text and finds the most similar documents.
+    """
+    # Call the search function with the same parameters
+    search.callback(query, top_k, author, path, since)
 
 
 @app.command()
@@ -276,13 +362,29 @@ def stats() -> None:
     console.print(f"  Embedding model: {config.embed_model}")
 
 
+@app.command("status")
+def status() -> None:
+    """Show indexing statistics and storage info.
+
+    Alias for 'stats' command. Displays the number of documents and configuration details.
+    """
+    stats.callback()
+
+
 @app.command()
 def index(
     path: str = typer.Argument(".", help="Path to directory to index (default: current directory)"),
+    exclude: list[str] = typer.Option(
+        None,
+        "--exclude",
+        "-e",
+        help="Additional patterns to exclude (can be specified multiple times)",
+    ),
 ) -> None:
     """Index files from a directory.
 
     Recursively indexes all .py and .md files in the specified directory.
+    Excludes .git, .venv, __pycache__, node_modules, and other common ignore patterns.
     """
     import uuid
 
@@ -311,14 +413,41 @@ def index(
         console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
-    # Find all text files
-    files = list(index_path.rglob("*.py")) + list(index_path.rglob("*.md"))
+    # Default exclusion patterns
+    default_excludes = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", "venv", ".venv", ".env", ".eggs", "*.egg-info", ".hg", ".svn", ".bzr", "vendor"}
+    if exclude:
+        default_excludes.update(exclude)
 
-    console.print(f"[green]Indexing {len(files)} files...[/green]")
+    def should_exclude(path: Path) -> bool:
+        """Check if path matches any exclusion pattern."""
+        parts = path.parts
+        for pattern in default_excludes:
+            if pattern.startswith("*"):
+                # Handle glob patterns like *.egg-info
+                if any(part.endswith(pattern[1:]) for part in parts):
+                    return True
+            else:
+                # Handle directory name patterns
+                if pattern in parts:
+                    return True
+        return False
 
+    # Find all text files with exclusion filtering
+    all_files = list(index_path.rglob("*.py")) + list(index_path.rglob("*.md"))
+    excluded_files = [f for f in all_files if should_exclude(f)]
+    files_to_index = [f for f in all_files if not should_exclude(f)]
+
+    console.print(f"[green]Indexing {len(files_to_index)} files (attempted {len(all_files)}, excluded {len(excluded_files)})...[/green]")
+
+    indexed_count = 0
+    skipped_count = 0
     try:
-        for file in files:
+        for file in files_to_index:
             try:
+                # Skip binary or unreadable files
+                if not file.is_file():
+                    skipped_count += 1
+                    continue
                 text = file.read_text()
                 doc_id = str(uuid.uuid4())
                 vector = embedder.embed_single(text)
@@ -326,7 +455,15 @@ def index(
                     doc_id, vector, text,
                     {"source": str(file), "type": file.suffix}
                 )
+                indexed_count += 1
+            except UnicodeDecodeError:
+                skipped_count += 1
+                error_console.print(f"[yellow]Skipped binary file: {file}[/yellow]")
+            except PermissionError:
+                skipped_count += 1
+                error_console.print(f"[yellow]Skipped unreadable file: {file}[/yellow]")
             except Exception as e:
+                skipped_count += 1
                 error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
     except Exception as e:
         console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
@@ -334,7 +471,10 @@ def index(
     finally:
         store.close()
 
-    console.print(f"[green]Indexed {len(files)} files[/green]")
+    if skipped_count > 0:
+        console.print(f"[green]Indexed {indexed_count} files, skipped {skipped_count} (excluded {len(excluded_files)})[/green]")
+    else:
+        console.print(f"[green]Indexed {indexed_count} files (excluded {len(excluded_files)})[/green]")
 
 
 @app.command()
@@ -406,7 +546,7 @@ def commit_index(
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
-        # Get commits
+        # Get commits - in incremental mode, fetch enough to find last_indexed
         all_commits = git.get_commits(limit=limit)
     except Exception as e:
         console.print(f"[red]Error fetching commits:[/red] {_escape_rich(str(e))}")
@@ -424,6 +564,26 @@ def commit_index(
                 found_last = True
                 break
             filtered.append(commit)
+        # If we didn't find the last indexed commit, we may have a backlog
+        # Fetch more commits until we find it or exhaust all
+        if not found_last:
+            # Continue fetching in batches until we find last_indexed or run out
+            offset = limit
+            while not found_last:
+                more_commits = git.get_commits(limit=limit, offset=offset)
+                if not more_commits:
+                    break
+                for commit in more_commits:
+                    if commit.hash == last_indexed:
+                        found_last = True
+                        break
+                    filtered.append(commit)
+                offset += limit
+                if found_last:
+                    break
+                # Check if we've reached the end
+                if len(more_commits) < limit:
+                    break
         # If we found the last indexed commit, only index newer ones
         if found_last:
             commits = filtered
@@ -578,8 +738,8 @@ def uninstall(
     console.print("[green]Removed post-commit hook[/green]")
 
 
-@hook_app.command()
-def status(
+@hook_app.command("status")
+def hook_status(
     path: str = typer.Option(".", "--repo", "-r", help="Git repository path"),
 ) -> None:
     """Check if post-commit hook is installed."""
