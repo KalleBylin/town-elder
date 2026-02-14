@@ -38,6 +38,87 @@ def _escape_rich(text: str) -> str:
     return text.replace("[", "\\[").replace("]", "\\]")
 
 
+def _run_search(
+    query: str,
+    top_k: int,
+    author: str | None,
+    path: str | None,
+    since: str | None,
+) -> None:
+    """Shared implementation for search-style commands."""
+    config = get_config(data_dir=_data_dir)
+
+    # Validate that database is initialized
+    if not config.data_dir.exists():
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    try:
+        services = get_service_factory(data_dir=_data_dir)
+        embedder = services.create_embedder()
+        store = services.create_vector_store()
+    except Exception as e:
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    try:
+        # Embed the query
+        query_vector = embedder.embed_single(query)
+
+        # Search
+        results = store.search(query_vector, top_k=top_k)
+    except Exception as e:
+        console.print(f"[red]Error during search:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+    finally:
+        store.close()
+
+    if not results:
+        console.print("[yellow]No results found[/yellow]")
+        return
+
+    console.print(f"[bold]Search results for:[/bold] {query}")
+    for i, result in enumerate(results, 1):
+        console.print(f"\n[bold]{i}.[/bold] Score: {result['score']:.3f}")
+        # Escape brackets in text to avoid Rich markup interpretation
+        text_snippet = result["text"][:200].replace("[", "\\[").replace("]", "\\]")
+        console.print(f"   {text_snippet}...")
+
+
+def _run_stats() -> None:
+    """Shared implementation for stats-style commands."""
+    config = get_config(data_dir=_data_dir)
+
+    # Validate that database is initialized
+    if not config.data_dir.exists():
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    try:
+        services = get_service_factory(data_dir=_data_dir)
+        store = services.create_vector_store()
+    except Exception as e:
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    try:
+        count = store.count()
+    except Exception as e:
+        console.print(f"[red]Error getting stats:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+    finally:
+        store.close()
+
+    console.print("[bold]Replay Statistics[/bold]")
+    console.print(f"  Documents: {count}")
+    # Escape brackets in path to avoid Rich markup interpretation
+    data_dir_str = str(config.data_dir).replace("[", "\\[").replace("]", "\\]")
+    console.print(f"  Data directory: {data_dir_str}")
+    console.print(f"  Embedding model: {config.embed_model}")
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -184,44 +265,7 @@ def search(
 
     Embeds the query text and finds the most similar documents.
     """
-    config = get_config(data_dir=_data_dir)
-
-    # Validate that database is initialized
-    if not config.data_dir.exists():
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        services = get_service_factory(data_dir=_data_dir)
-        embedder = services.create_embedder()
-        store = services.create_vector_store()
-    except Exception as e:
-        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        # Embed the query
-        query_vector = embedder.embed_single(query)
-
-        # Search
-        results = store.search(query_vector, top_k=top_k)
-    except Exception as e:
-        console.print(f"[red]Error during search:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-    finally:
-        store.close()
-
-    if not results:
-        console.print("[yellow]No results found[/yellow]")
-        return
-
-    console.print(f"[bold]Search results for:[/bold] {query}")
-    for i, result in enumerate(results, 1):
-        console.print(f"\n[bold]{i}.[/bold] Score: {result['score']:.3f}")
-        # Escape brackets in text to avoid Rich markup interpretation
-        text_snippet = result["text"][:200].replace("[", "\\[").replace("]", "\\]")
-        console.print(f"   {text_snippet}...")
+    _run_search(query=query, top_k=top_k, author=author, path=path, since=since)
 
 
 @app.command("query")
@@ -253,8 +297,7 @@ def query(
 
     Alias for 'search' command. Embeds the query text and finds the most similar documents.
     """
-    # Call the search function with the same parameters
-    search.callback(query, top_k, author, path, since)
+    _run_search(query=query, top_k=top_k, author=author, path=path, since=since)
 
 
 @app.command()
@@ -331,35 +374,7 @@ def stats() -> None:
 
     Displays the number of documents and configuration details.
     """
-    config = get_config(data_dir=_data_dir)
-
-    # Validate that database is initialized
-    if not config.data_dir.exists():
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        services = get_service_factory(data_dir=_data_dir)
-        store = services.create_vector_store()
-    except Exception as e:
-        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        count = store.count()
-    except Exception as e:
-        console.print(f"[red]Error getting stats:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-    finally:
-        store.close()
-
-    console.print("[bold]Replay Statistics[/bold]")
-    console.print(f"  Documents: {count}")
-    # Escape brackets in path to avoid Rich markup interpretation
-    data_dir_str = str(config.data_dir).replace("[", "\\[").replace("]", "\\]")
-    console.print(f"  Data directory: {data_dir_str}")
-    console.print(f"  Embedding model: {config.embed_model}")
+    _run_stats()
 
 
 @app.command("status")
@@ -368,7 +383,7 @@ def status() -> None:
 
     Alias for 'stats' command. Displays the number of documents and configuration details.
     """
-    stats.callback()
+    _run_stats()
 
 
 @app.command()
@@ -598,6 +613,8 @@ def commit_index(
 
     indexed_count = 0
     skipped_count = 0
+    frontier_commit_hash: str | None = None
+    frontier_blocked = False
     try:
         for commit in commits:
             try:
@@ -621,20 +638,22 @@ def commit_index(
                     }
                 )
                 indexed_count += 1
+                if not frontier_blocked:
+                    frontier_commit_hash = commit.hash
             except Exception as e:
                 error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
                 skipped_count += 1
+                frontier_blocked = True
     except Exception as e:
         console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
     finally:
         store.close()
 
-    # Save last indexed commit state
-    if commits:
+    # Save last indexed commit state based only on contiguous successful indexing.
+    if frontier_commit_hash:
         import json
-        last_commit = commits[-1]  # Last in the list (oldest of indexed)
-        state = {"last_indexed_commit": last_commit.hash}
+        state = {"last_indexed_commit": frontier_commit_hash}
         state_file.write_text(json.dumps(state))
 
     if skipped_count > 0:
