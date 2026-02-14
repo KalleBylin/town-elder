@@ -39,6 +39,69 @@ def temp_git_repo() -> Iterator[Path]:
         yield repo_path
 
 
+class TestHookInstall:
+    """Tests for hook install functionality."""
+
+    def test_hook_install_preserves_data_dir(self, temp_git_repo: Path):
+        """Hook install should preserve --data-dir in generated hook script."""
+        custom_data_dir = temp_git_repo / ".custom-replay"
+
+        # Initialize with custom data-dir
+        result = subprocess.run(
+            [
+                "uv", "run", "replay",
+                "--data-dir", str(custom_data_dir),
+                "init",
+                "--path", str(temp_git_repo),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Install hook with custom data-dir
+        result = subprocess.run(
+            [
+                "uv", "run", "replay",
+                "--data-dir", str(custom_data_dir),
+                "hook", "install",
+                "--repo", str(temp_git_repo),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Verify the hook contains the data-dir
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        hook_content = hook_path.read_text()
+        assert str(custom_data_dir) in hook_content
+        assert "--data-dir" in hook_content
+
+    def test_hook_install_works_without_data_dir(self, temp_git_repo: Path):
+        """Hook install should work without explicit --data-dir."""
+        # Initialize with default location
+        result = subprocess.run(
+            ["uv", "run", "replay", "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Install hook without data-dir
+        result = subprocess.run(
+            ["uv", "run", "replay", "hook", "install", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Verify the hook exists and is executable
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        assert hook_path.exists()
+        assert hook_path.stat().st_mode & 0o111  # executable
+
+
 class TestHookUninstall:
     """Tests for hook uninstall safety."""
 

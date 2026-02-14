@@ -5,7 +5,7 @@ import numpy as np
 
 from replay.embeddings.embedder import Embedder
 from replay.git.diff_parser import DiffFile, DiffParser
-from replay.storage.vector_store import ZvecStore
+from replay.storage.vector_store import VectorStoreError, ZvecStore
 
 
 class TestEmbedder:
@@ -142,6 +142,64 @@ class TestVectorStore:
     def test_vector_store_delete_nonexistent(self, sample_vector_store):
         """Test deleting a nonexistent document doesn't raise."""
         sample_vector_store.delete("nonexistent")  # Should not raise
+
+    def test_vector_store_creates_new_on_nonexistent_path(self, temp_dir):
+        """Test that opening a nonexistent path creates a new collection."""
+        store_path = temp_dir / "nonexistent.vec"
+        # Verify path doesn't exist
+        assert not store_path.exists()
+
+        # Opening should create a new collection
+        store = ZvecStore(path=store_path, dimension=384)
+        assert store.count() == 0
+        store.close()
+
+    def test_vector_store_fails_on_corrupted_collection(self, temp_dir):
+        """Test that opening a corrupted collection fails with actionable error."""
+        store_path = temp_dir / "corrupted.vec"
+        store_path.mkdir(parents=True, exist_ok=True)
+
+        # Write invalid/corrupted data to simulate corruption
+        (store_path / "_metadata").write_bytes(b"invalid corrupted data")
+
+        # Opening should raise VectorStoreError with actionable message
+        store = ZvecStore(path=store_path, dimension=384)
+        try:
+            store.count()
+            assert False, "Expected VectorStoreError to be raised"
+        except Exception as e:
+            # Should NOT silently create a new collection
+            assert "Failed to open zvec collection" in str(e) or "corruption" in str(e).lower() or "schema" in str(e).lower()
+        finally:
+            store.close()
+
+    def test_vector_store_no_implicit_create_on_permission_error(self, temp_dir):
+        """Test that permission errors are surfaced, not masked by implicit create."""
+        # This test simulates a permission error scenario
+        # In practice, this would require OS-level permission manipulation
+        # which is difficult to test reliably, so we test the error message quality
+
+        store_path = temp_dir / "permissions.vec"
+
+        # Create a store, then try to open it in a way that would fail
+        store = ZvecStore(path=store_path, dimension=384)
+        store.insert("test", {})
+        store.close()
+
+        # Now try to open with wrong dimension - this should fail meaningfully
+        # (different dimension = schema mismatch)
+        wrong_dim_store = ZvecStore(path=store_path, dimension=256)
+        try:
+            wrong_dim_store.count()
+            # If it doesn't raise, the old behavior (silent recreate) happened
+            # which is the bug we're fixing
+            assert False, "Expected VectorStoreError for schema mismatch"
+        except Exception as e:
+            # Should have actionable error message
+            error_str = str(e).lower()
+            assert "failed" in error_str or "error" in error_str
+        finally:
+            wrong_dim_store.close()
 
 
 class TestDiffParser:

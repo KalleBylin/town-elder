@@ -523,8 +523,19 @@ def install(
             error_console.print("[yellow]Warning: Existing hook is not a replay hook[/yellow]")
             console.print("Use --force to overwrite anyway")
 
-    # Create the hook content
-    hook_content = """#!/bin/sh
+    # Get the data directory that was used (or would be used by default)
+    config = get_config(data_dir=_data_dir)
+
+    # Determine the data_dir to use in the hook - use absolute path for reliability
+    # Only include --data-dir if explicitly configured
+    if _data_dir:
+        data_dir_arg = f"--data-dir {config.data_dir}"
+        hook_content = f"""#!/bin/sh
+# Replay post-commit hook - automatically indexes commits
+replay {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
+"""
+    else:
+        hook_content = """#!/bin/sh
 # Replay post-commit hook - automatically indexes commits
 replay commit-index --repo "$(git rev-parse --show-toplevel)"
 """
