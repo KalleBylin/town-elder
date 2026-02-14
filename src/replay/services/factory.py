@@ -1,7 +1,6 @@
 """Service factory for dependency injection."""
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 
 from replay.config import get_config
@@ -13,9 +12,9 @@ from replay.storage import ZvecStore
 class ServiceFactory:
     """Factory for creating service instances with dependency injection."""
 
-    def __init__(self):
+    def __init__(self, data_dir: Path | str | None = None):
         """Initialize the service factory."""
-        self._config = get_config()
+        self._config = get_config(data_dir=data_dir)
 
     def create_embedder(self) -> Embedder:
         """Create an Embedder instance.
@@ -54,11 +53,10 @@ class ServiceFactory:
         return DiffParser()
 
 
-@lru_cache
-def get_service_factory() -> ServiceFactory:
-    """Get a cached ServiceFactory instance.
+def get_service_factory(data_dir: Path | str | None = None) -> ServiceFactory:
+    """Create a ServiceFactory instance.
 
     Returns:
-        A singleton ServiceFactory instance.
+        A ServiceFactory instance.
     """
-    return ServiceFactory()
+    return ServiceFactory(data_dir=data_dir)

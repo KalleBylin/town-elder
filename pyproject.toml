@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-replay = "replay.cli:app"
+replay = "replay.cli:run"
 
 [build-system]
 requires = ["setuptools>=61.0"]

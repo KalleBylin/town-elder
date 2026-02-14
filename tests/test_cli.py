@@ -122,6 +122,111 @@ class TestPathSemantics:
         output = result.stdout + result.stderr
         assert str(data_dir) in output
 
+    def test_data_dir_isolation_from_default_store(self, temp_git_repo: Path):
+        """--data-dir should isolate reads/writes from the default cwd store."""
+        root_marker = "ROOT_MARKER_12345"
+        custom_marker = "CUSTOM_MARKER_67890"
+        custom_data_dir = temp_git_repo / ".custom-replay"
+
+        # Seed the default cwd store.
+        subprocess.run(
+            ["uv", "run", "replay", "init", "--path", str(temp_git_repo)],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            ["uv", "run", "replay", "add", "--text", root_marker],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        # Seed an explicit custom store.
+        subprocess.run(
+            [
+                "uv",
+                "run",
+                "replay",
+                "--data-dir",
+                str(custom_data_dir),
+                "init",
+                "--path",
+                str(temp_git_repo),
+            ],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "uv",
+                "run",
+                "replay",
+                "--data-dir",
+                str(custom_data_dir),
+                "add",
+                "--text",
+                custom_marker,
+            ],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        # Export from custom store and ensure no leakage from default store.
+        result = subprocess.run(
+            [
+                "uv",
+                "run",
+                "replay",
+                "--data-dir",
+                str(custom_data_dir),
+                "export",
+                "--output",
+                "-",
+                "--format",
+                "json",
+            ],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        output = result.stdout + result.stderr
+        assert custom_marker in output
+        assert root_marker not in output
+
+
+class TestModuleEntrypoints:
+    """Tests for python -m module entrypoints."""
+
+    def test_python_m_replay_cli_runs(self):
+        """python -m replay.cli should be executable."""
+        result = subprocess.run(
+            ["uv", "run", "python", "-m", "replay.cli", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Usage:" in result.stdout
+        assert "replay.cli" in result.stdout
+
+    def test_python_m_replay_runs(self):
+        """python -m replay should be executable."""
+        result = subprocess.run(
+            ["uv", "run", "python", "-m", "replay", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Usage:" in result.stdout
+        assert "python -m replay" in result.stdout
+
 
 class TestMetadataValidation:
     """Tests for metadata validation."""

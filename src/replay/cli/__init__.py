@@ -30,7 +30,7 @@ _data_dir: Path | None = None
 def set_data_dir(path: Path | str | None) -> None:
     """Set the global data directory."""
     global _data_dir
-    _data_dir = Path(path) if path else None
+    _data_dir = Path(path).expanduser() if path else None
 
 
 def _escape_rich(text: str) -> str:
@@ -93,7 +93,7 @@ def init(
         error_console.print(f"[red]Error: Path is not a directory: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    data_dir = init_path / ".replay"
+    data_dir = _data_dir or (init_path / ".replay")
 
     if data_dir.exists() and not force:
         error_console.print(f"[yellow]Already initialized at {data_dir}[/yellow]")
@@ -140,7 +140,7 @@ def search(
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
-        services = get_service_factory()
+        services = get_service_factory(data_dir=_data_dir)
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
@@ -216,7 +216,7 @@ def add(
             raise typer.Exit(code=EXIT_INVALID_ARG)
 
     try:
-        services = get_service_factory()
+        services = get_service_factory(data_dir=_data_dir)
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
@@ -254,7 +254,7 @@ def stats() -> None:
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
-        services = get_service_factory()
+        services = get_service_factory(data_dir=_data_dir)
         store = services.create_vector_store()
     except Exception as e:
         console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
@@ -304,7 +304,7 @@ def index(
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     try:
-        services = get_service_factory()
+        services = get_service_factory(data_dir=_data_dir)
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
@@ -396,7 +396,7 @@ def commit_index(
             pass  # Ignore invalid state file
 
     try:
-        services = get_service_factory()
+        services = get_service_factory(data_dir=_data_dir)
         git = services.create_git_runner(repo_path)
         embedder = services.create_embedder()
         store = services.create_vector_store()
@@ -644,7 +644,7 @@ def export(
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     try:
-        services = get_service_factory()
+        services = get_service_factory(data_dir=_data_dir)
         store = services.create_vector_store()
     except Exception as e:
         console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
@@ -676,5 +676,10 @@ def export(
             raise typer.Exit(code=EXIT_ERROR)
 
 
-if __name__ == "__main__":
+def run() -> None:
+    """Console script entry point."""
     app()
+
+
+if __name__ == "__main__":
+    run()
