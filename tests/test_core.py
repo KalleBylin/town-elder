@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from replay.embeddings.embedder import Embedder
-from replay.git.diff_parser import DiffParser, DiffFile
+from replay.git.diff_parser import DiffFile, DiffParser
 from replay.storage.vector_store import ZvecStore
 
 

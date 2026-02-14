@@ -27,7 +27,7 @@ class ZvecStore:
         if self._collection is None:
             try:
                 import zvec
-                from zvec import FieldSchema, VectorSchema, DataType
+                from zvec import DataType, FieldSchema, VectorSchema
 
                 # First, try to open existing collection
                 path_str = str(self.path)
@@ -61,9 +61,10 @@ class ZvecStore:
 
     def insert(self, text: str, metadata: dict[str, Any]) -> str:
         """Insert a document with embedding."""
-        import uuid
-        import zvec
         import json
+        import uuid
+
+        import zvec
 
         doc_id = metadata.get("id", str(uuid.uuid4()))
         vector = np.zeros(self.dimension, dtype=np.float32)
@@ -81,8 +82,9 @@ class ZvecStore:
 
     def insert_with_vector(self, doc_id: str, vector: np.ndarray, text: str, metadata: dict[str, Any]) -> str:
         """Insert a document with pre-computed embedding."""
-        import zvec
         import json
+
+        import zvec
 
         collection = self._get_collection()
         collection.insert(
@@ -100,6 +102,7 @@ class ZvecStore:
     def search(self, query_vector: np.ndarray, top_k: int = 5) -> list[dict[str, Any]]:
         """Search for similar documents using cosine similarity."""
         import json
+
         import zvec
         collection = self._get_collection()
 
@@ -118,7 +121,7 @@ class ZvecStore:
                 "id": result.id,
                 "text": result.fields.get("text", ""),
                 "metadata": json.loads(result.fields.get("metadata", "{}")),
-                "score": 1.0,  # zvec doesn't provide scores in the same way
+                "score": result.score,
             })
         return output
 
@@ -126,38 +129,66 @@ class ZvecStore:
         """Get a document by ID."""
         import json
         collection = self._get_collection()
-        try:
-            # Use fetch to get by ID - returns a dict, not a list
-            docs = collection.fetch(ids=[doc_id])
-            if doc_id in docs:
-                doc = docs[doc_id]
-                return {
-                    "text": doc.fields.get("text", ""),
-                    "metadata": json.loads(doc.fields.get("metadata", "{}")),
-                }
-        except Exception:
-            pass
+        # Use fetch to get by ID - returns a dict, not a list
+        docs = collection.fetch(ids=[doc_id])
+        if doc_id in docs:
+            doc = docs[doc_id]
+            return {
+                "text": doc.fields.get("text", ""),
+                "metadata": json.loads(doc.fields.get("metadata", "{}")),
+            }
         return None
 
     def delete(self, doc_id: str) -> None:
         """Delete a document by ID."""
         collection = self._get_collection()
-        try:
-            collection.delete(doc_id)
-        except Exception:
-            pass
+        collection.delete(doc_id)
 
     def count(self) -> int:
         """Return the number of documents."""
         collection = self._get_collection()
-        try:
-            stats = collection.stats
-            return stats.doc_count
-        except Exception:
-            return 0
+        stats = collection.stats
+        return stats.doc_count
 
     def close(self) -> None:
         """Close the store."""
         # zvec collections don't need explicit closing
         # but we reset the reference to allow re-opening
         self._collection = None
+
+    def get_all(self, include_vectors: bool = False) -> list[dict[str, Any]]:
+        """Get all documents from the store.
+
+        Args:
+            include_vectors: If True, include the embedding vectors in the output.
+
+        Returns:
+            List of documents with id, text, metadata, and optionally vectors.
+        """
+        import json
+
+
+        collection = self._get_collection()
+
+        # Query all documents without a vector (empty filter matches all)
+        output_fields = ["text", "metadata"]
+        if include_vectors:
+            output_fields.append("embedding")
+
+        results = collection.query(
+            topk=collection.stats.doc_count,
+            output_fields=output_fields,
+            include_vector=include_vectors,
+        )
+
+        output = []
+        for result in results:
+            doc = {
+                "id": result.id,
+                "text": result.fields.get("text", ""),
+                "metadata": json.loads(result.fields.get("metadata", "{}")),
+            }
+            if include_vectors and hasattr(result, "vectors"):
+                doc["vector"] = result.vectors.get("embedding", [])
+            output.append(doc)
+        return output

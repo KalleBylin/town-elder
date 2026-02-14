@@ -1,9 +1,9 @@
 """Query service for replay."""
 from __future__ import annotations
 
+from replay.config import get_config
 from replay.embeddings import Embedder
 from replay.storage import ZvecStore
-from replay.config import get_config
 
 
 class QueryService:

@@ -1,5 +1,4 @@
 """Configuration management."""
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -43,24 +42,20 @@ class ReplayConfig(BaseSettings):
     # Logging
     verbose: bool = False
 
-    def update_data_dir(self, path: Path | str | None = None) -> None:
-        """Update the data directory.
 
-        Args:
-            path: Optional path to use. If None, uses default logic.
-        """
-        if path:
-            self.data_dir = Path(path)
-        else:
-            self.data_dir = _get_default_data_dir()
-
-
-def get_config(clear_cache: bool = False) -> ReplayConfig:
+@lru_cache
+def get_config(data_dir: str | Path | None = None, clear_cache: bool = False) -> ReplayConfig:
     """Get cached configuration instance.
 
     Args:
+        data_dir: Optional data directory to use. If provided, overrides default.
         clear_cache: If True, clear the cache before returning config.
     """
     if clear_cache:
         get_config.cache_clear()
-    return ReplayConfig()
+
+    if data_dir:
+        config = ReplayConfig(data_dir=Path(data_dir))
+    else:
+        config = ReplayConfig()
+    return config

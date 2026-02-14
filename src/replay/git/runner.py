@@ -5,7 +5,6 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 
 @dataclass
@@ -15,13 +14,13 @@ class Commit:
     message: str
     author: str
     date: datetime
-    files_changed: List[str] = field(default_factory=list)
+    files_changed: list[str] = field(default_factory=list)
 
 
 class GitRunner:
     """Git runner using subprocess to execute git commands."""
 
-    def __init__(self, repo_path: Optional[Path | str] = None):
+    def __init__(self, repo_path: Path | str | None = None):
         """Initialize the GitRunner.
 
         Args:
@@ -29,7 +28,7 @@ class GitRunner:
         """
         self.repo_path = Path(repo_path) if repo_path else Path.cwd()
 
-    def _run_git(self, args: List[str]) -> str:
+    def _run_git(self, args: list[str]) -> str:
         """Run a git command and return the output.
 
         Args:
@@ -50,7 +49,7 @@ class GitRunner:
         )
         return result.stdout.strip()
 
-    def get_commits(self, since: Optional[str] = None, limit: int = 100) -> List[Commit]:
+    def get_commits(self, since: str | None = None, limit: int = 100) -> list[Commit]:
         """Get commits from the repository.
 
         Args:
@@ -60,7 +59,7 @@ class GitRunner:
         Returns:
             List of Commit objects.
         """
-        args = ["log", f"-n", str(limit), "--format=%H|||%s|||%an|||%ad|||%f", "--date=iso"]
+        args = ["log", "-n", str(limit), "--format=%H|||%s|||%an|||%ad|||%f", "--date=iso"]
         if since:
             args.extend([f"--since={since}"])
 
@@ -93,7 +92,7 @@ class GitRunner:
 
         return commits
 
-    def _get_commit_files(self, commit_hash: str) -> List[str]:
+    def _get_commit_files(self, commit_hash: str) -> list[str]:
         """Get the list of files changed in a commit.
 
         Args:
@@ -119,7 +118,7 @@ class GitRunner:
         """
         return self._run_git(["show", commit_hash, "--format="])
 
-    def get_commit_range(self, start: str, end: str) -> List[str]:
+    def get_commit_range(self, start: str, end: str) -> list[str]:
         """Get commits between two references.
 
         Args:

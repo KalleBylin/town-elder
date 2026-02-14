@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import typer
@@ -21,7 +20,17 @@ app = typer.Typer(
     help="Local-first semantic memory CLI for AI coding agents",
     add_completion=False,
 )
-console = Console(stderr=True)
+console = Console(stderr=False)  # stdout for normal output
+error_console = Console(stderr=True)  # stderr for errors
+
+# Global data directory option
+_data_dir: Path | None = None
+
+
+def set_data_dir(path: Path | str | None) -> None:
+    """Set the global data directory."""
+    global _data_dir
+    _data_dir = Path(path) if path else None
 
 
 def _escape_rich(text: str) -> str:
@@ -30,11 +39,22 @@ def _escape_rich(text: str) -> str:
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context):
+def main(
+    ctx: typer.Context,
+    data_dir: str | None = typer.Option(
+        None,
+        "--data-dir",
+        "-d",
+        help="Data directory (default: .replay in current directory or home)",
+    ),
+):
     """replay - Semantic memory for AI agents.
 
     A local-first semantic memory CLI for AI coding agents.
     """
+    if data_dir:
+        set_data_dir(data_dir)
+
     if ctx.invoked_subcommand is None:
         console.print("[bold]replay[/bold] - Semantic memory CLI")
         console.print("Use --help for usage information")
@@ -66,24 +86,24 @@ def init(
 
     # Validate path
     if not init_path.exists():
-        console.print(f"[red]Error: Path does not exist: {path}[/red]")
+        error_console.print(f"[red]Error: Path does not exist: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     if not init_path.is_dir():
-        console.print(f"[red]Error: Path is not a directory: {path}[/red]")
+        error_console.print(f"[red]Error: Path is not a directory: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     data_dir = init_path / ".replay"
 
     if data_dir.exists() and not force:
-        console.print(f"[yellow]Already initialized at {data_dir}[/yellow]")
+        error_console.print(f"[yellow]Already initialized at {data_dir}[/yellow]")
         console.print("Use --force to overwrite existing database")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
     except PermissionError as e:
-        console.print(f"[red]Error: Cannot create directory:[/red] {_escape_rich(str(e))}")
+        error_console.print(f"[red]Error: Cannot create directory:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
@@ -111,11 +131,11 @@ def search(
 
     Embeds the query text and finds the most similar documents.
     """
-    config = get_config()
+    config = get_config(data_dir=_data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
-        console.print("[red]Error: Database not initialized[/red]")
+        error_console.print("[red]Error: Database not initialized[/red]")
         console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
@@ -172,11 +192,11 @@ def add(
     """
     import uuid
 
-    config = get_config()
+    config = get_config(data_dir=_data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
-        console.print("[red]Error: Database not initialized[/red]")
+        error_console.print("[red]Error: Database not initialized[/red]")
         console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
@@ -186,8 +206,13 @@ def add(
         try:
             meta = json.loads(metadata)
         except json.JSONDecodeError as e:
-            console.print(f"[red]Error: Invalid JSON metadata[/red]")
-            console.print(f"[dim]JSON parse error at position {e.pos}: {e.msg}[/dim]")
+            error_console.print("[red]Error: Invalid JSON metadata[/red]")
+            error_console.print(f"[dim]JSON parse error at position {e.pos}: {e.msg}[/dim]")
+            raise typer.Exit(code=EXIT_INVALID_ARG)
+
+        # Validate metadata is an object (dict), not a list or string
+        if not isinstance(meta, dict):
+            error_console.print(f"[red]Error: Metadata must be a JSON object (dict), not {type(meta).__name__}[/red]")
             raise typer.Exit(code=EXIT_INVALID_ARG)
 
     try:
@@ -220,11 +245,11 @@ def stats() -> None:
 
     Displays the number of documents and configuration details.
     """
-    config = get_config()
+    config = get_config(data_dir=_data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
-        console.print("[red]Error: Database not initialized[/red]")
+        error_console.print("[red]Error: Database not initialized[/red]")
         console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
@@ -243,7 +268,7 @@ def stats() -> None:
     finally:
         store.close()
 
-    console.print(f"[bold]Replay Statistics[/bold]")
+    console.print("[bold]Replay Statistics[/bold]")
     console.print(f"  Documents: {count}")
     # Escape brackets in path to avoid Rich markup interpretation
     data_dir_str = str(config.data_dir).replace("[", "\\[").replace("]", "\\]")
@@ -261,21 +286,21 @@ def index(
     """
     import uuid
 
-    config = get_config()
+    config = get_config(data_dir=_data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
-        console.print("[red]Error: Database not initialized[/red]")
+        error_console.print("[red]Error: Database not initialized[/red]")
         console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     index_path = Path(path).resolve()
     if not index_path.exists():
-        console.print(f"[red]Error: Path does not exist: {path}[/red]")
+        error_console.print(f"[red]Error: Path does not exist: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     if not index_path.is_dir():
-        console.print(f"[red]Error: Path is not a directory: {path}[/red]")
+        error_console.print(f"[red]Error: Path is not a directory: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     try:
@@ -302,7 +327,7 @@ def index(
                     {"source": str(file), "type": file.suffix}
                 )
             except Exception as e:
-                console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
+                error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
     except Exception as e:
         console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
@@ -326,6 +351,17 @@ def commit_index(
         "-n",
         help="Number of commits to index (default: 100)",
     ),
+    incremental: bool = typer.Option(
+        True,
+        "--incremental/--full",
+        help="Only index new commits since last run (default: incremental)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Force re-indexing of all commits, ignoring last indexed state",
+    ),
 ) -> None:
     """Index git commits from a repository.
 
@@ -333,20 +369,31 @@ def commit_index(
     """
     import uuid
 
-    config = get_config()
+    config = get_config(data_dir=_data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
-        console.print("[red]Error: Database not initialized[/red]")
+        error_console.print("[red]Error: Database not initialized[/red]")
         console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     repo_path = Path(path).resolve()
 
     if not (repo_path / ".git").exists():
-        console.print(f"[red]Error: Not a git repository: {path}[/red]")
+        error_console.print(f"[red]Error: Not a git repository: {path}[/red]")
         console.print("[dim]Ensure the path contains a .git directory[/dim]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
+
+    # Load last indexed commit from state file
+    state_file = config.data_dir / "index_state.json"
+    last_indexed = None
+    if state_file.exists() and incremental and not force:
+        import json
+        try:
+            state = json.loads(state_file.read_text())
+            last_indexed = state.get("last_indexed_commit")
+        except Exception:
+            pass  # Ignore invalid state file
 
     try:
         services = get_service_factory()
@@ -360,14 +407,39 @@ def commit_index(
 
     try:
         # Get commits
-        commits = git.get_commits(limit=limit)
+        all_commits = git.get_commits(limit=limit)
     except Exception as e:
         console.print(f"[red]Error fetching commits:[/red] {_escape_rich(str(e))}")
         store.close()
         raise typer.Exit(code=EXIT_ERROR)
 
+    # Filter commits if using incremental mode
+    commits = all_commits
+    if incremental and last_indexed and not force:
+        # Find the position of last indexed commit
+        found_last = False
+        filtered = []
+        for commit in all_commits:
+            if commit.hash == last_indexed:
+                found_last = True
+                break
+            filtered.append(commit)
+        # If we found the last indexed commit, only index newer ones
+        if found_last:
+            commits = filtered
+
+    # Reverse to index from oldest to newest
+    commits = list(reversed(commits))
+
+    if not commits:
+        console.print("[green]No new commits to index[/green]")
+        store.close()
+        return
+
     console.print(f"[green]Indexing {len(commits)} commits...[/green]")
 
+    indexed_count = 0
+    skipped_count = 0
     try:
         for commit in commits:
             try:
@@ -390,15 +462,27 @@ def commit_index(
                         "message": commit.message,
                     }
                 )
+                indexed_count += 1
             except Exception as e:
-                console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                skipped_count += 1
     except Exception as e:
         console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
     finally:
         store.close()
 
-    console.print(f"[green]Indexed {len(commits)} commits[/green]")
+    # Save last indexed commit state
+    if commits:
+        import json
+        last_commit = commits[-1]  # Last in the list (oldest of indexed)
+        state = {"last_indexed_commit": last_commit.hash}
+        state_file.write_text(json.dumps(state))
+
+    if skipped_count > 0:
+        console.print(f"[green]Indexed {indexed_count} commits, skipped {skipped_count}[/green]")
+    else:
+        console.print(f"[green]Indexed {indexed_count} commits[/green]")
 
 
 
@@ -428,7 +512,7 @@ def install(
 
     # Check if hook already exists
     if hook_path.exists() and not force:
-        console.print(f"[yellow]Hook already exists at {hook_path}[/yellow]")
+        error_console.print(f"[yellow]Hook already exists at {hook_path}[/yellow]")
         console.print("Use --force to overwrite, or run 'replay hook uninstall' first")
         raise typer.Exit(code=EXIT_ERROR)
 
@@ -436,7 +520,7 @@ def install(
     if hook_path.exists() and force:
         existing_content = hook_path.read_text()
         if "replay commit-index" not in existing_content:
-            console.print(f"[yellow]Warning: Existing hook is not a replay hook[/yellow]")
+            error_console.print("[yellow]Warning: Existing hook is not a replay hook[/yellow]")
             console.print("Use --force to overwrite anyway")
 
     # Create the hook content
@@ -457,23 +541,30 @@ replay commit-index --repo "$(git rev-parse --show-toplevel)"
 @hook_app.command()
 def uninstall(
     path: str = typer.Option(".", "--repo", "-r", help="Git repository path"),
+    force: bool = typer.Option(False, "--force", "-f", help="Allow deletion of non-Replay hooks"),
 ) -> None:
     """Remove post-commit hook."""
     repo_path = Path(path).resolve()
     hook_path = repo_path / ".git" / "hooks" / "post-commit"
 
     if not hook_path.exists():
-        console.print(f"[yellow]No post-commit hook found at {hook_path}[/yellow]")
+        error_console.print(f"[yellow]No post-commit hook found at {hook_path}[/yellow]")
         return
 
     # Check if it's a replay hook
     content = hook_path.read_text()
-    if "replay commit-index" not in content:
-        console.print(f"[yellow]Warning: Hook exists but may not be a replay hook[/yellow]")
-        console.print("Use 'replay hook status' to check")
+    is_replay_hook = "replay commit-index" in content
+
+    if not is_replay_hook and not force:
+        error_console.print("[red]Error: Hook exists but is not a Replay hook[/red]")
+        console.print("[yellow]Use --force to delete non-Replay hooks[/yellow]")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    if not is_replay_hook and force:
+        error_console.print("[yellow]Warning: Deleting non-Replay hook (--force specified)[/yellow]")
 
     hook_path.unlink()
-    console.print(f"[green]Removed post-commit hook[/green]")
+    console.print("[green]Removed post-commit hook[/green]")
 
 
 @hook_app.command()
@@ -491,11 +582,11 @@ def status(
     hook_path = git_dir / "hooks" / "post-commit"
 
     if not hook_path.exists():
-        console.print(f"[bold]Hook status:[/bold] Not installed")
-        console.print(f"Run 'replay hook install' to install")
+        console.print("[bold]Hook status:[/bold] Not installed")
+        console.print("Run 'replay hook install' to install")
         return
 
-    console.print(f"[bold]Hook status:[/bold] Installed")
+    console.print("[bold]Hook status:[/bold] Installed")
     console.print(f"Hook path: {hook_path}")
 
     content = hook_path.read_text()
@@ -506,6 +597,83 @@ def status(
 
 
 app.add_typer(hook_app, name="hook")
+
+
+@app.command()
+def export(
+    output: str = typer.Option(
+        "-",
+        "--output",
+        "-o",
+        help="Output file path (default: stdout). Use .jsonl extension for JSONL format.",
+    ),
+    format: str = typer.Option(
+        "json",
+        "--format",
+        "-f",
+        help="Export format: json or jsonl (default: json)",
+    ),
+    include_vectors: bool = typer.Option(
+        False,
+        "--include-vectors",
+        help="Include embedding vectors in export (increases file size significantly)",
+    ),
+) -> None:
+    """Export indexed data to a file.
+
+    Exports all documents from the vector store to JSON or JSONL format.
+    """
+    config = get_config(data_dir=_data_dir)
+
+    # Validate that database is initialized
+    if not config.data_dir.exists():
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    # Determine format from file extension if not explicitly specified
+    if output != "-" and not format:
+        if output.endswith(".jsonl"):
+            format = "jsonl"
+        else:
+            format = "json"
+
+    # Validate format
+    if format not in ("json", "jsonl"):
+        error_console.print(f"[red]Error: Invalid format '{format}'. Use 'json' or 'jsonl'.[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+
+    try:
+        services = get_service_factory()
+        store = services.create_vector_store()
+    except Exception as e:
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    try:
+        documents = store.get_all(include_vectors=include_vectors)
+    except Exception as e:
+        console.print(f"[red]Error exporting data:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+    finally:
+        store.close()
+
+    # Serialize to chosen format
+    if format == "jsonl":
+        output_data = "\n".join(json.dumps(doc) for doc in documents)
+    else:
+        output_data = json.dumps(documents, indent=2)
+
+    # Write output
+    if output == "-":
+        console.print(output_data)
+    else:
+        try:
+            Path(output).write_text(output_data)
+            console.print(f"[green]Exported {len(documents)} documents to {output}[/green]")
+        except Exception as e:
+            console.print(f"[red]Error writing to file:[/red] {_escape_rich(str(e))}")
+            raise typer.Exit(code=EXIT_ERROR)
 
 
 if __name__ == "__main__":

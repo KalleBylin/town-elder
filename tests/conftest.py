@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import numpy as np
 import pytest
@@ -43,7 +43,13 @@ def sample_embedder() -> Embedder:
 @pytest.fixture
 def sample_vector_store(temp_dir: Path) -> ZvecStore:
     """Create a sample vector store instance."""
-    return ZvecStore(path=temp_dir / "test.vec", dimension=384)
+    store = ZvecStore(path=temp_dir / "test.vec", dimension=384)
+    yield store
+    # Ensure proper cleanup before temp directory is removed
+    try:
+        store.close()
+    except Exception:
+        pass  # Ignore errors during cleanup
 
 
 @pytest.fixture

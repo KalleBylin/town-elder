@@ -5,14 +5,14 @@ Local-first semantic memory for AI coding agents. Index your codebase and git hi
 ## Quick Start
 
 ```bash
-# Initialize replay in your project
-replay init
+# Initialize replay in your project (using uv)
+uv run replay init
 
 # Index your code files
-replay index
+uv run replay index
 
 # Search semantically
-replay search "authentication logic"
+uv run replay search "authentication logic"
 ```
 
 ## Installation
@@ -31,6 +31,25 @@ cd replay
 pip install -e .
 ```
 
+## Running with uv
+
+This project uses [uv](https://github.com/astral-sh/uv) for dependency management. All commands should be run with `uv run`:
+
+```bash
+# Run replay commands from the project root
+uv run replay <command>
+
+# Operate on a different repository (using --data-dir)
+uv run replay --data-dir /path/to/target-repo/.replay <command>
+```
+
+For example, to index commits in another repository:
+
+```bash
+uv run replay --data-dir /path/to/target-repo/.replay init --path /path/to/target-repo
+uv run replay --data-dir /path/to/target-repo/.replay commit-index --repo /path/to/target-repo
+```
+
 ## Usage
 
 ### A) Fresh Project (New Repository)
@@ -39,20 +58,20 @@ Start from scratch and build semantic memory as you develop.
 
 ```bash
 # Initialize the database in your project
-$ replay init
+$ uv run replay init
 Initialized replay database at /path/to/project/.replay
 
 # Index your codebase (Python and Markdown files)
-$ replay index
+$ uv run replay index
 Indexing 42 files...
 Indexed 42 files
 
 # Add contextual notes for AI agents
-$ replay add -t "Use FastAPI for REST APIs, Django for full-stack apps" \
+$ uv run replay add -t "Use FastAPI for REST APIs, Django for full-stack apps" \
   -m '{"source": "architecture-guidelines"}'
 
 # Search your semantic memory
-$ replay search "API framework"
+$ uv run replay search "API framework"
 Search results for: API framework
 
 1. Score: 0.892
@@ -72,18 +91,18 @@ Unlock tribal knowledge from your git history.
 $ cd /path/to/existing-project
 
 # Initialize replay
-$ replay init
+$ uv run replay init
 
 # Index all commits (last 100 by default)
-$ replay commit-index
+$ uv run replay commit-index
 Indexing 100 commits...
 Indexed 100 commits
 
 # Or limit to a specific number
-$ replay commit-index --limit 50
+$ uv run replay commit-index --limit 50
 
 # Search git history semantically
-$ replay search "payment retry bug"
+$ uv run replay search "payment retry bug"
 Search results for: payment retry bug
 
 1. Score: 0.923
@@ -95,27 +114,30 @@ Search results for: payment retry bug
    +  sleep_factor = 2  # exponential backoff
 
 # Install automatic indexing on every commit
-$ replay hook install
+$ uv run replay hook install
 Installed post-commit hook at /path/to/.git/hooks/post-commit
 Commits will now be automatically indexed
 ```
 
 ## Commands Reference
 
+All commands use `uv run replay`:
+
 | Command | Description |
 |---------|-------------|
-| `replay init` | Initialize a replay database in the current directory |
-| `replay add` | Add a document with optional metadata |
-| `replay index` | Index all `.py` and `.md` files in a directory |
-| `replay search` | Search indexed documents semantically |
-| `replay stats` | Show document count and configuration |
-| `replay commit-index` | Index git commits from a repository |
-| `replay hook install` | Install post-commit hook for automatic indexing |
-| `replay hook uninstall` | Remove post-commit hook |
-| `replay hook status` | Check if hook is installed |
+| `uv run replay init` | Initialize a replay database in the current directory |
+| `uv run replay add` | Add a document with optional metadata |
+| `uv run replay index` | Index all `.py` and `.md` files in a directory |
+| `uv run replay search` | Search indexed documents semantically |
+| `uv run replay stats` | Show document count and configuration |
+| `uv run replay commit-index` | Index git commits from a repository |
+| `uv run replay hook install` | Install post-commit hook for automatic indexing |
+| `uv run replay hook uninstall` | Remove post-commit hook |
+| `uv run replay hook status` | Check if hook is installed |
 
 ### Options
 
+- `--data-dir`, `-d`: Data directory (default: .replay in current directory or home)
 - `--path`, `-p`: Specify directory path (for init, index)
 - `--top-k`, `-k`: Number of search results (default: 5)
 - `--limit`, `-n`: Number of commits to index (default: 100)
