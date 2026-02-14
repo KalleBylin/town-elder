@@ -414,7 +414,7 @@ def index(
         raise typer.Exit(code=EXIT_ERROR)
 
     # Default exclusion patterns
-    default_excludes = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", "venv", ".venv", ".env", ".eggs", "*.egg-info", ".hg", ".svn", ".bzr", "vendor"}
+    default_excludes = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", "venv", ".env", ".eggs", "*.egg-info", ".hg", ".svn", ".bzr", "vendor"}
     if exclude:
         default_excludes.update(exclude)
 
@@ -507,8 +507,6 @@ def commit_index(
 
     Parses commit messages and diffs to create searchable commit history.
     """
-    import uuid
-
     config = get_config(data_dir=_data_dir)
 
     # Validate that database is initialized
@@ -778,11 +776,11 @@ def export(
         "-o",
         help="Output file path (default: stdout). Use .jsonl extension for JSONL format.",
     ),
-    format: str = typer.Option(
-        "json",
+    format: str | None = typer.Option(
+        None,
         "--format",
         "-f",
-        help="Export format: json or jsonl (default: json)",
+        help="Export format: json or jsonl (default: json, or auto-detect from extension)",
     ),
     include_vectors: bool = typer.Option(
         False,

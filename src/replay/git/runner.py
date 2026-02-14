@@ -41,7 +41,7 @@ class GitRunner:
             subprocess.CalledProcessError: If the git command fails.
         """
         cmd = ["git", "-C", str(self.repo_path)] + args
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             cmd,
             capture_output=True,
             text=True,

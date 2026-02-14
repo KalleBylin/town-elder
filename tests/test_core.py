@@ -5,7 +5,7 @@ import numpy as np
 
 from replay.embeddings.embedder import Embedder
 from replay.git.diff_parser import DiffFile, DiffParser
-from replay.storage.vector_store import VectorStoreError, ZvecStore
+from replay.storage.vector_store import ZvecStore
 
 
 class TestEmbedder:

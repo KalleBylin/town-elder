@@ -77,7 +77,15 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "B008",   # do not perform function calls in argument defaults
+    "B904",   # exception chaining - typer.Exit replaces original exception intentionally
+    "S103",   # os.chmod for setting executable bits on hook files is intentional
+    "S110",   # try/except pass for ignoring invalid state file is intentional
+    "PLC0415", # lazy imports for optional dependencies
+    "ARG001", # unused CLI options - placeholder for future implementation
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S603", "S607", "B011"]  # assert and subprocess calls are fine in tests
 
 [tool.ruff.lint.isort]
 known-first-party = ["replay"]
