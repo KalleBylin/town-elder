@@ -12,6 +12,37 @@ bd close <id>         # Complete work
 bd sync               # Sync with git
 ```
 
+## Development
+
+This project uses **uv** for dependency management and **pyenv** for Python version control.
+
+### Setup
+
+```bash
+# Install dependencies (uses .python-version and uv.lock)
+uv sync
+
+# Run the CLI
+uv run replay <command>
+
+# Add dependencies
+uv add <package>
+uv add --dev <package>
+
+# Run tests
+uv run pytest
+```
+
+### Python Version
+
+Python version is managed by pyenv via `.python-version`. To change:
+
+```bash
+pyenv install 3.12    # Install a new version
+# Edit .python-version
+uv sync               # Re-sync dependencies
+```
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
