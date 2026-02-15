@@ -25,6 +25,78 @@ uv run te index
 uv run te search "authentication logic"
 ```
 
+## How To Use This Day-To-Day
+
+Town Elder is not a replacement for `grep` or raw `git` commands.
+It is a semantic recall layer you use before exact tools.
+
+### When to use Town Elder vs `grep`/`git`
+
+- Use **Town Elder** first when you do not know exact keywords, symbol names, or commit hashes.
+  - Examples: "why was retry logic changed?", "what fixed the stale state bug?", "where do we handle not-initialized UX errors?"
+- Use **`rg` and `git`** after Town Elder finds likely targets.
+  - Examples: open exact lines, inspect specific diffs, edit code, run tests.
+
+### Recommended Agent Workflow
+
+1. Initialize (optionally isolated data dir for experiments):
+```bash
+uv run te --data-dir /tmp/te-session init --path /path/to/repo
+```
+2. Build memory from current code + history:
+```bash
+uv run te --data-dir /tmp/te-session index /path/to/repo
+uv run te --data-dir /tmp/te-session commit-index --repo /path/to/repo --limit 200
+```
+3. Ask intent-level questions:
+```bash
+uv run te --data-dir /tmp/te-session search "data-dir leakage across CLI invocations"
+uv run te --data-dir /tmp/te-session search "last indexed commit not found stale state"
+```
+4. Pivot to exact tools to implement changes:
+```bash
+rg -n "data-dir|sentinel|last_indexed_commit" src tests
+git log --oneline --grep="data-dir leakage"
+git show <commit-hash>
+```
+5. Save new project knowledge for later runs:
+```bash
+uv run te --data-dir /tmp/te-session add \
+  --text "Safety rule: never delete non-Town Elder hooks unless --force" \
+  --metadata '{"source":"engineering-note","topic":"hook-safety"}'
+```
+6. Keep history memory fresh automatically:
+```bash
+uv run te --data-dir /tmp/te-session hook install --repo /path/to/repo
+```
+
+### Practical Coding Task Examples
+
+1. **Understand a regression before touching code**
+```bash
+uv run te search "friendly error when database is not initialized"
+```
+Then:
+```bash
+rg -n "Database not initialized|ConfigError" src tests
+```
+
+2. **Find historical intent behind a bugfix**
+```bash
+uv run te search "fix incremental backlog loss when last indexed commit missing"
+```
+Then:
+```bash
+git log --oneline --grep="last indexed commit"
+git show <commit-hash>
+```
+
+3. **Capture team rules that are not obvious from code**
+```bash
+uv run te add --text "Do not remove non-TE git hooks unless --force is explicit"
+uv run te search "rule for deleting git hooks"
+```
+
 ## Installation
 
 ### From PyPI
