@@ -142,10 +142,11 @@ class CLIServiceContext:
 @contextmanager
 def get_cli_services(
     ctx: typer.Context,
-) -> Generator[tuple[CLIServiceContext, Embedder, ZvecStore], None, None]:
+    include_embedder: bool = True,
+) -> Generator[tuple[CLIServiceContext, Embedder | None, ZvecStore], None, None]:
     """Context manager for CLI services with automatic cleanup.
 
-    Provides validated config, embedder, and vector store with
+    Provides validated config, embedder (optional), and vector store with
     automatic cleanup on exit.
 
     Usage:
@@ -155,9 +156,11 @@ def get_cli_services(
 
     Args:
         ctx: Typer context
+        include_embedder: Whether to create the embedder (default: True).
+            Set to False for commands that don't need embedding (e.g., stats, export).
 
     Yields:
-        Tuple of (CLIServiceContext, Embedder, ZvecStore)
+        Tuple of (CLIServiceContext, Embedder | None, ZvecStore)
 
     Raises:
         typer.Exit: If services cannot be initialized
@@ -177,8 +180,10 @@ def get_cli_services(
         raise typer.Exit(code=EXIT_ERROR)
 
     # Create services
+    embedder = None
     try:
-        embedder = svc.create_embedder()
+        if include_embedder:
+            embedder = svc.create_embedder()
         store = svc.create_vector_store()
     except ServiceInitError as e:
         console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")

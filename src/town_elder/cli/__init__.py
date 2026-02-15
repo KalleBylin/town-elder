@@ -21,6 +21,7 @@ from town_elder.cli_services import (
     EXIT_SUCCESS,
     CLIContext,
     CLIServiceContext,
+    ServiceInitError,
     _escape_rich,
     console,
     error_console,
@@ -264,7 +265,7 @@ def _run_stats(ctx: typer.Context) -> None:
     # Get config for display info
     config = require_initialized(ctx)
 
-    with get_cli_services(ctx) as (svc, embedder, store):
+    with get_cli_services(ctx, include_embedder=False) as (svc, embedder, store):
         try:
             count = store.count()
         except Exception as e:
@@ -698,10 +699,14 @@ def commit_index(  # noqa: PLR0912, PLR0913
 
     # Get services
     svc = CLIServiceContext(ctx)
-    git = svc.create_git_runner(repo_path)
-    embedder = svc.create_embedder()
-    store = svc.create_vector_store()
-    diff_parser = svc.create_diff_parser()
+    try:
+        git = svc.create_git_runner(repo_path)
+        embedder = svc.create_embedder()
+        store = svc.create_vector_store()
+        diff_parser = svc.create_diff_parser()
+    except ServiceInitError as e:
+        console.print(f"[red]Error initializing services:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
 
     try:
         initial_limit = batch_size if all_history else limit
@@ -1037,7 +1042,7 @@ def export(  # noqa: PLR0912
         error_console.print(f"[red]Error: Invalid format '{format}'. Use 'json' or 'jsonl'.[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    with get_cli_services(ctx) as (svc, embedder, store):
+    with get_cli_services(ctx, include_embedder=False) as (svc, embedder, store):
         try:
             documents = store.get_all(include_vectors=include_vectors)
         except Exception as e:
