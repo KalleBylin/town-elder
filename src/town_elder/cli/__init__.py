@@ -424,12 +424,20 @@ def init(  # noqa: PLR0912
                 if hook_path.exists():
                     console.print("[yellow]Warning: Hook already exists, skipping. Use 'te hook install --force' to overwrite[/yellow]")
                 else:
-                    # Use uv run for robustness across uv/pyenv environments
-                    # where bare 'python' may not be available on PATH
+                    # Use a fallback chain: uv run te -> te -> python -m town_elder
+                    # This ensures the hook works even if uv is not installed
                     # Properly quote path to handle spaces
                     hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-uv run te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
+# Try uv first, then te, then python -m town_elder
+
+if command -v uv >/dev/null 2>&1; then
+    uv run te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
+elif command -v te >/dev/null 2>&1; then
+    te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
+else
+    python -m town_elder --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
+fi
 """
                     hook_path.write_text(hook_content)
                     os.chmod(hook_path, 0o755)
@@ -938,19 +946,35 @@ def install(
         raise typer.Exit(code=EXIT_ERROR)
 
     # Determine the data_dir to use in the hook - use absolute path for reliability
-    # Use uv run for robustness across uv/pyenv environments
-    # where bare 'python' may not be available on PATH
+    # Use a fallback chain: uv run te -> te -> python -m town_elder
+    # This ensures the hook works even if uv is not installed
     # Properly quote paths to handle spaces
     if data_dir:
         data_dir_arg = f'--data-dir "{config.data_dir}"'
         hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-uv run te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
+# Try uv first, then te, then python -m town_elder
+
+if command -v uv >/dev/null 2>&1; then
+    uv run te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
+elif command -v te >/dev/null 2>&1; then
+    te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
+else
+    python -m town_elder {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
+fi
 """
     else:
         hook_content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-uv run te commit-index --repo "$(git rev-parse --show-toplevel)"
+# Try uv first, then te, then python -m town_elder
+
+if command -v uv >/dev/null 2>&1; then
+    uv run te commit-index --repo "$(git rev-parse --show-toplevel)"
+elif command -v te >/dev/null 2>&1; then
+    te commit-index --repo "$(git rev-parse --show-toplevel)"
+else
+    python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
+fi
 """
 
     hook_path.write_text(hook_content)

@@ -653,13 +653,19 @@ class TestHookExecution:
             hook_path = repo_path / ".git" / "hooks" / "post-commit"
             assert hook_path.exists()
 
-            # Verify the generated hook uses uv run te (robust to pyenv/uv environments)
+            # Verify the generated hook uses fallback chain: uv -> te -> python -m town_elder
             hook_content = hook_path.read_text()
             assert "uv run te" in hook_content, (
-                f"Hook should use 'uv run te' for robustness. Got: {hook_content}"
+                f"Hook should use 'uv run te' as primary method. Got: {hook_content}"
             )
-            assert "python -m town_elder" not in hook_content, (
-                "Hook should not use bare 'python -m town_elder' (not robust)"
+            assert "command -v uv" in hook_content, (
+                "Hook should check for uv availability"
+            )
+            assert "command -v te" in hook_content, (
+                "Hook should check for te availability"
+            )
+            assert "python -m town_elder" in hook_content, (
+                "Hook should have python -m town_elder as fallback"
             )
 
             # Verify no index state before commit
