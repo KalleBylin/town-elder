@@ -247,3 +247,61 @@ your-project/
 - **Indexed file types**: `.py` and `.md` files
 
 Configuration is managed via environment variables or `pyproject.toml`. See `town_elder.config` for available options.
+
+## Troubleshooting
+
+### First-Run Model Download
+
+On first use, Town Elder downloads an embedding model from HuggingFace. This may take some time depending on your internet connection.
+
+**What to expect:**
+- Initial commands (`te index`, `te search`, `te add`, `te commit-index`) may take 30-60 seconds on first run
+- The model (~100MB) is downloaded once and cached locally
+- Subsequent runs will be fast
+
+**Common issues:**
+
+| Issue | Solution |
+|-------|----------|
+| Slow first run | Normal - model is being downloaded. Wait for completion. |
+| "Failed to load embedding backend" | Install fastembed: `pip install fastembed` or `uv pip install fastembed` |
+| Network error during download | Ensure internet access to HuggingFace (huggingface.co). Check proxy settings if behind a firewall. |
+| Model not found | Ensure fastembed is installed: `pip show fastembed` |
+
+### Hook Prerequisites
+
+The post-commit hook automatically indexes commits after each `git commit`. For hooks to work correctly:
+
+**Requirements:**
+1. **Git repository**: Must run in a directory with a `.git` folder
+2. **Python or uv**: The hook uses a fallback chain (`uv` → `te` → `python -m town_elder`)
+3. **Initialized database**: Run `te init` before installing hooks
+
+**Hook fallback chain:**
+```sh
+# First tries uv
+command -v uv >/dev/null 2>&1 && uv run te commit-index ... && exit
+# Then tries te command
+command -v te >/dev/null 2>&1 && te commit-index ... && exit
+# Finally falls back to python module
+python -m town_elder commit-index ...
+```
+
+**Common issues:**
+
+| Issue | Solution |
+|-------|----------|
+| Commits not being indexed | Check hook status: `te hook status` |
+| Hook not found | Install it: `te hook install` |
+| "command not found" errors | Ensure `uv`, `te`, or Python is on your PATH |
+| Hook runs but nothing happens | Ensure database is initialized: `te init` first |
+| uv not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`, or use `--no-uv` flag and ensure `te` is installed |
+
+**Verifying hook installation:**
+```bash
+# Check if hook is installed
+te hook status
+
+# View installed hook content
+cat .git/hooks/post-commit
+```
