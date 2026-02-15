@@ -6,6 +6,7 @@ from typing import Any
 
 from replay.config import get_config
 from replay.embeddings import Embedder
+from replay.exceptions import IndexingError
 from replay.storage import ZvecStore
 
 
@@ -28,28 +29,42 @@ class IndexService:
         self.store.insert(doc_id, vector, text, metadata)
         return doc_id
 
-    def index_file(self, file_path: Path) -> str | None:
-        """Index a file."""
+    def index_file(self, file_path: Path) -> str:
+        """Index a file.
+
+        Raises IndexingError if the file cannot be read or indexed.
+        """
         try:
             text = file_path.read_text()
-            doc_id = str(file_path)
-            metadata = {
-                "source": str(file_path),
-                "type": file_path.suffix,
-            }
-            return self.index_text(text, doc_id, metadata)
-        except Exception:
-            return None
+        except OSError as e:
+            raise IndexingError(f"Failed to read file {file_path}: {e}") from e
+
+        doc_id = str(file_path)
+        metadata = {
+            "source": str(file_path),
+            "type": file_path.suffix,
+        }
+        return self.index_text(text, doc_id, metadata)
 
     def index_directory(self, directory: Path, extensions: list[str] | None = None) -> int:
-        """Index all files in a directory."""
+        """Index all files in a directory.
+
+        Raises IndexingError if indexing fails.
+        """
         extensions = extensions or [".py", ".md", ".txt", ".json", ".yaml", ".yml"]
         count = 0
+        errors: list[str] = []
 
         for ext in extensions:
             for file_path in directory.rglob(f"*{ext}"):
-                if self.index_file(file_path):
+                try:
+                    self.index_file(file_path)
                     count += 1
+                except IndexingError as e:
+                    errors.append(str(e))
+
+        if errors:
+            raise IndexingError(f"Failed to index {len(errors)} file(s): {'; '.join(errors)}")
 
         return count
 

@@ -24,3 +24,8 @@ class ConfigError(ReplayError):
 class VectorError(ReplayError):
     """Vector-related errors."""
     pass
+
+
+class IndexingError(ReplayError):
+    """Indexing-related errors."""
+    pass
