@@ -550,17 +550,26 @@ class TestConfigErrorHandling:
     Now they show friendly CLI errors with actionable guidance.
     """
 
-    def test_stats_shows_friendly_error_when_not_initialized(self, tmp_path):
-        """te stats should show friendly error, not traceback, when not initialized."""
+    @staticmethod
+    def _run_te(tmp_path, *args):
+        """Run te command in tmp_path using uv run with explicit project dir."""
         import subprocess
+        from pathlib import Path
 
-        # Run in a non-initialized directory
+        # Get project directory dynamically (tests are in <project>/tests/)
+        project_dir = Path(__file__).parent.parent
+
         result = subprocess.run(
-            ["uv", "run", "te", "stats"],
+            ["uv", "run", "--project", str(project_dir), "te", *args],
             cwd=tmp_path,
             capture_output=True,
             text=True,
         )
+        return result
+
+    def test_stats_shows_friendly_error_when_not_initialized(self, tmp_path):
+        """te stats should show friendly error, not traceback, when not initialized."""
+        result = self._run_te(tmp_path, "stats")
 
         # Should fail with non-zero exit
         assert result.returncode != 0
@@ -575,14 +584,7 @@ class TestConfigErrorHandling:
 
     def test_search_shows_friendly_error_when_not_initialized(self, tmp_path):
         """te search should show friendly error, not traceback, when not initialized."""
-        import subprocess
-
-        result = subprocess.run(
-            ["uv", "run", "te", "search", "test query"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_te(tmp_path, "search", "test query")
 
         assert result.returncode != 0
         assert "Traceback (most recent call last)" not in result.stderr
@@ -591,14 +593,7 @@ class TestConfigErrorHandling:
 
     def test_query_shows_friendly_error_when_not_initialized(self, tmp_path):
         """te query should show friendly error, not traceback, when not initialized."""
-        import subprocess
-
-        result = subprocess.run(
-            ["uv", "run", "te", "query", "test query"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_te(tmp_path, "query", "test query")
 
         assert result.returncode != 0
         assert "Traceback (most recent call last)" not in result.stderr
@@ -606,14 +601,7 @@ class TestConfigErrorHandling:
 
     def test_status_shows_friendly_error_when_not_initialized(self, tmp_path):
         """te status should show friendly error, not traceback, when not initialized."""
-        import subprocess
-
-        result = subprocess.run(
-            ["uv", "run", "te", "status"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_te(tmp_path, "status")
 
         assert result.returncode != 0
         assert "Traceback (most recent call last)" not in result.stderr
@@ -621,14 +609,7 @@ class TestConfigErrorHandling:
 
     def test_export_shows_friendly_error_when_not_initialized(self, tmp_path):
         """te export should show friendly error, not traceback, when not initialized."""
-        import subprocess
-
-        result = subprocess.run(
-            ["uv", "run", "te", "export"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_te(tmp_path, "export")
 
         assert result.returncode != 0
         assert "Traceback (most recent call last)" not in result.stderr
@@ -641,12 +622,7 @@ class TestConfigErrorHandling:
         # Create a git repo so hook install doesn't fail on "not a git repo" first
         subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
 
-        result = subprocess.run(
-            ["uv", "run", "te", "hook", "install"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_te(tmp_path, "hook", "install")
 
         assert result.returncode != 0
         assert "Traceback (most recent call last)" not in result.stderr
@@ -654,14 +630,7 @@ class TestConfigErrorHandling:
 
     def test_error_message_instructs_to_use_data_dir_option(self, tmp_path):
         """Error messages should guide users to use --data-dir option."""
-        import subprocess
-
-        result = subprocess.run(
-            ["uv", "run", "te", "stats"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_te(tmp_path, "stats")
 
         assert result.returncode != 0
         # Should mention --data-dir as an option (guidance goes to stdout)
