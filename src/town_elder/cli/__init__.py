@@ -998,7 +998,8 @@ def export(  # noqa: PLR0912
 
     # Write output
     if output == "-":
-        console.print(output_data)
+        # Use built-in print to avoid Rich markup interpretation
+        print(output_data)
     else:
         try:
             Path(output).write_text(output_data)

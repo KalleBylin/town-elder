@@ -305,6 +305,42 @@ class TestPathSemantics:
         # Should contain valid JSON output
         assert "hello world" in output
 
+    def test_export_to_stdout_preserves_raw_content(self, temp_git_repo: Path):
+        """Export to stdout should preserve raw content without Rich markup interpretation."""
+        # Initialize and add data with bracket-like text
+        subprocess.run(
+            ["uv", "run", "te", "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        # Add text containing Rich-like markup tags
+        subprocess.run(
+            ["uv", "run", "te", "add", "--text", "contains [brackets] and [bold]tags[/bold]"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        # Export to stdout
+        result = subprocess.run(
+            ["uv", "run", "te", "export", "--output", "-", "--format", "json"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Export failed: {result.stderr}"
+        # The raw bracket content must be preserved in output
+        assert "[brackets]" in result.stdout
+        assert "[bold]" in result.stdout
+        assert "[/bold]" in result.stdout
+        # Verify it's valid JSON that can be parsed
+        import json
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["text"] == "contains [brackets] and [bold]tags[/bold]"
+
 
 class TestModuleEntrypoints:
     """Tests for python -m module entrypoints."""
