@@ -12,6 +12,11 @@ from replay.git.runner import Commit
 
 runner = CliRunner()
 
+# Constants for commit index tests
+_TEST_COMMITS_LARGE = 150  # More than default limit to test backlog handling
+_TEST_COMMITS_MEDIUM = 50
+_TEST_COMMITS_RETRY_COUNT = 49
+
 
 def test_query_alias_executes_via_shared_helper(monkeypatch):
     """`replay query` should dispatch through the shared search helper."""
@@ -284,3 +289,95 @@ def test_hook_generation_quotes_data_dir(tmp_path):
         assert str(data_dir) in hook_content
     finally:
         cli.set_data_dir(None)
+
+
+def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monkeypatch, tmp_path):
+    """When sentinel commit is missing, should warn and NOT advance state."""
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+
+    # Create a state file with a sentinel that doesn't exist in history
+    state_file = data_dir / "index_state.json"
+    state_file.write_text(json.dumps({"last_indexed_commit": "missing_commit"}))
+
+    # Create more commits than the default limit to test backlog handling
+    commits = [_commit(f"c{i}") for i in range(_TEST_COMMITS_LARGE)]
+    controller = _StoreController(fail_hashes=set())
+    factory = _FakeFactory(git_runner=_FakeGitRunner(commits), controller=controller)
+    config = SimpleNamespace(data_dir=data_dir, embed_model="test-model")
+
+    def fake_get_config(data_dir=None):
+        _ = data_dir
+        return config
+
+    def fake_get_service_factory(data_dir=None):
+        _ = data_dir
+        return factory
+
+    monkeypatch.setattr(cli, "get_config", fake_get_config)
+    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+
+    result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
+
+    assert result.exit_code == 0
+    # Should warn about missing sentinel
+    assert "Warning: Last indexed commit not found" in result.output
+    # Should NOT advance state
+    assert not state_file.exists() or json.loads(state_file.read_text()).get("last_indexed_commit") == "missing_commit"
+    # Should have indexed all available commits (more than limit, but should get all via pagination)
+    assert len(controller.indexed_hashes) == _TEST_COMMITS_LARGE
+
+
+def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_path):
+    """After missing sentinel run, next run should find sentinel and catch up correctly."""
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+
+    # First run: state points to commit not in current history (simulating gc)
+    state_file = data_dir / "index_state.json"
+    state_file.write_text(json.dumps({"last_indexed_commit": "old_gc_commit"}))
+
+    # Current history has commits, none of which are "old_gc_commit"
+    commits = [_commit(f"c{i}") for i in range(_TEST_COMMITS_MEDIUM, 0, -1)]
+    controller = _StoreController(fail_hashes=set())
+    factory = _FakeFactory(git_runner=_FakeGitRunner(commits), controller=controller)
+    config = SimpleNamespace(data_dir=data_dir, embed_model="test-model")
+
+    def fake_get_config(data_dir=None):
+        _ = data_dir
+        return config
+
+    def fake_get_service_factory(data_dir=None):
+        _ = data_dir
+        return factory
+
+    monkeypatch.setattr(cli, "get_config", fake_get_config)
+    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+
+    # First run: sentinel not found
+    result1 = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
+    assert result1.exit_code == 0
+    assert "Warning: Last indexed commit not found" in result1.output
+    first_state = json.loads(state_file.read_text())
+    # State should NOT have advanced
+    assert first_state["last_indexed_commit"] == "old_gc_commit"
+    # All commits should have been indexed
+    assert len(controller.indexed_hashes) == _TEST_COMMITS_MEDIUM
+
+    # Simulate gc: now the state points to c1 (oldest indexed)
+    controller.indexed_hashes.clear()
+    state_file.write_text(json.dumps({"last_indexed_commit": "c1"}))
+
+    # Second run: should find c1 and only index newer commits
+    result2 = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
+    assert result2.exit_code == 0
+    assert "Warning" not in result2.output
+    second_state = json.loads(state_file.read_text())
+    # State should have advanced to the newest indexed commit
+    assert second_state["last_indexed_commit"] == "c50"
+    # Should have indexed remaining newer commits
+    assert len(controller.indexed_hashes) == _TEST_COMMITS_RETRY_COUNT

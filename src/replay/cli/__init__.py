@@ -612,6 +612,7 @@ def commit_index(
 
     # Filter commits if using incremental mode
     commits = all_commits
+    sentinel_found = True  # Assume found unless we determine otherwise
     if incremental and last_indexed and not force:
         # Find the position of last indexed commit
         found_last = False
@@ -624,6 +625,8 @@ def commit_index(
         # If we didn't find the last indexed commit, we may have a backlog
         # Fetch more commits until we find it or exhaust all
         if not found_last:
+            # Sentinel not found - this is a stale/missing state situation
+            sentinel_found = False
             # Continue fetching in batches until we find last_indexed or run out
             offset = limit
             while not found_last:
@@ -643,6 +646,16 @@ def commit_index(
                     break
         # If we found the last indexed commit, only index newer ones
         if found_last:
+            commits = filtered
+        else:
+            # Sentinel still not found after exhausting all commits.
+            # This means the state file points to a garbage-collected or corrupted commit.
+            # We must not do partial indexing with unsafe state advance.
+            # Index all available commits (from all batches) but don't advance state.
+            console.print("[yellow]Warning: Last indexed commit not found in history.[/yellow]")
+            console.print("[yellow]This may indicate stale state or garbage-collected commits.[/yellow]")
+            console.print("[yellow]Indexing all available commits without advancing state.[/yellow]")
+            # Use filtered (contains all commits from all batches), not just first page
             commits = filtered
 
     # Reverse to index from oldest to newest
@@ -694,8 +707,9 @@ def commit_index(
     finally:
         store.close()
 
-    # Save last indexed commit state based only on contiguous successful indexing.
-    if frontier_commit_hash:
+    # Save last indexed commit state only if sentinel was found.
+    # This prevents unsafe state advance when sentinel is missing/stale.
+    if frontier_commit_hash and sentinel_found:
         import json
         state = {"last_indexed_commit": frontier_commit_hash}
         state_file.write_text(json.dumps(state))
