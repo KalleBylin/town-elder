@@ -27,6 +27,36 @@ error_console = Console(stderr=True)  # stderr for errors
 _data_dir: Path | None = None
 
 
+def _is_replay_hook(content: str) -> bool:
+    """Check if hook content is a Replay commit-index hook.
+
+    Uses robust detection that handles:
+    - Extra arguments like --data-dir between replay and commit-index
+    - python -m replay invocation
+    - Bare replay invocation
+    """
+    import re
+
+    # Match patterns like:
+    # - replay commit-index
+    # - python -m replay commit-index
+    # - replay --data-dir /path commit-index
+    # - python -m replay --data-dir /path commit-index
+    # Uses word boundaries to avoid matching unrelated "replay" or "commit-index"
+    patterns = [
+        # replay commit-index (no extra args)
+        r'\breplay\s+commit-index\b',
+        # replay [args...] commit-index (with extra args)
+        r'\breplay\s+\S+.*\s+commit-index\b',
+        # python -m replay commit-index (no extra args)
+        r'\bpython\s+-m\s+replay\s+commit-index\b',
+        # python -m replay [args...] commit-index (with extra args)
+        r'\bpython\s+-m\s+replay\s+\S+.*\s+commit-index\b',
+    ]
+
+    return any(re.search(pattern, content) for pattern in patterns)
+
+
 def set_data_dir(path: Path | str | None) -> None:
     """Set the global data directory."""
     global _data_dir
@@ -183,10 +213,22 @@ def init(
 
     data_dir = _data_dir or (init_path / ".replay")
 
+    # Track whether this is a reinitialization
+    is_reinit = data_dir.exists()
+
     if data_dir.exists() and not force:
         error_console.print(f"[yellow]Already initialized at {data_dir}[/yellow]")
         console.print("Use --force to overwrite existing database")
         raise typer.Exit(code=EXIT_ERROR)
+
+    # If --force is used and directory exists, clear it first
+    if force and data_dir.exists():
+        import shutil
+        try:
+            shutil.rmtree(data_dir)
+        except PermissionError as e:
+            error_console.print(f"[red]Error: Cannot remove existing directory:[/red] {_escape_rich(str(e))}")
+            raise typer.Exit(code=EXIT_ERROR)
 
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -201,7 +243,8 @@ def init(
         console.print(f"[red]Error initializing storage:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
 
-    console.print(f"[green]Initialized replay database at {data_dir}[/green]")
+    status = "Reinitialized" if is_reinit else "Initialized"
+    console.print(f"[green]{status} replay database at {data_dir}[/green]")
 
     # Optionally install hook
     if install_hook:
@@ -220,10 +263,11 @@ def init(
                 if hook_path.exists():
                     console.print("[yellow]Warning: Hook already exists, skipping. Use 'replay hook install --force' to overwrite[/yellow]")
                 else:
-                    # Use absolute path for data_dir
+                    # Use python -m replay for robustness across uv/pyenv environments
+                    # Properly quote path to handle spaces
                     hook_content = f"""#!/bin/sh
 # Replay post-commit hook - automatically indexes commits
-replay --data-dir {data_dir} commit-index --repo "$(git rev-parse --show-toplevel)"
+python -m replay --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
 """
                     hook_path.write_text(hook_content)
                     os.chmod(hook_path, 0o755)
@@ -696,7 +740,7 @@ def install(
     # Check if it's a replay hook (ours or someone else's)
     if hook_path.exists() and force:
         existing_content = hook_path.read_text()
-        if "replay commit-index" not in existing_content:
+        if not _is_replay_hook(existing_content):
             error_console.print("[yellow]Warning: Existing hook is not a replay hook[/yellow]")
             console.print("Use --force to overwrite anyway")
 
@@ -704,17 +748,18 @@ def install(
     config = get_config(data_dir=_data_dir)
 
     # Determine the data_dir to use in the hook - use absolute path for reliability
-    # Only include --data-dir if explicitly configured
+    # Use python -m replay for robustness across uv/pyenv environments
+    # Properly quote paths to handle spaces
     if _data_dir:
-        data_dir_arg = f"--data-dir {config.data_dir}"
+        data_dir_arg = f'--data-dir "{config.data_dir}"'
         hook_content = f"""#!/bin/sh
 # Replay post-commit hook - automatically indexes commits
-replay {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
+python -m replay {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
 """
     else:
         hook_content = """#!/bin/sh
 # Replay post-commit hook - automatically indexes commits
-replay commit-index --repo "$(git rev-parse --show-toplevel)"
+python -m replay commit-index --repo "$(git rev-parse --show-toplevel)"
 """
 
     hook_path.write_text(hook_content)
@@ -741,7 +786,7 @@ def uninstall(
 
     # Check if it's a replay hook
     content = hook_path.read_text()
-    is_replay_hook = "replay commit-index" in content
+    is_replay_hook = _is_replay_hook(content)
 
     if not is_replay_hook and not force:
         error_console.print("[red]Error: Hook exists but is not a Replay hook[/red]")
@@ -778,7 +823,7 @@ def hook_status(
     console.print(f"Hook path: {hook_path}")
 
     content = hook_path.read_text()
-    if "replay commit-index" in content:
+    if _is_replay_hook(content):
         console.print("Hook type: Replay (automatic indexing)")
     else:
         console.print("Hook type: Unknown (not a replay hook)")
@@ -820,11 +865,11 @@ def export(
         raise typer.Exit(code=EXIT_ERROR)
 
     # Determine format from file extension if not explicitly specified
-    if output != "-" and not format:
-        if output.endswith(".jsonl"):
-            format = "jsonl"
-        else:
-            format = "json"
+    if output == "-" and not format:
+        # Default to json when outputting to stdout
+        format = "json"
+    elif not format:
+        format = "jsonl" if output.endswith(".jsonl") else "json"
 
     # Validate format
     if format not in ("json", "jsonl"):

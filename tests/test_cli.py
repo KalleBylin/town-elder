@@ -264,6 +264,35 @@ class TestPathSemantics:
         assert custom_marker in output
         assert root_marker not in output
 
+    def test_export_to_stdout_without_format_option(self, temp_git_repo: Path):
+        """Export to stdout without --format should default to json."""
+        # Initialize and add data
+        subprocess.run(
+            ["uv", "run", "replay", "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            ["uv", "run", "replay", "add", "--text", "hello world"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        # Export to stdout WITHOUT --format option (the bug case)
+        result = subprocess.run(
+            ["uv", "run", "replay", "export", "--output", "-"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Export failed: {result.stderr}"
+        output = result.stdout + result.stderr
+        # Should contain valid JSON output
+        assert "hello world" in output
+
 
 class TestModuleEntrypoints:
     """Tests for python -m module entrypoints."""
@@ -392,6 +421,54 @@ class TestExitCodes:
             text=True,
         )
         assert result.returncode != 0
+
+    def test_init_force_clears_existing_data(self, temp_git_repo: Path):
+        """replay init --force should clear existing data and reset document count to 0."""
+        data_dir = temp_git_repo / ".replay_force_test"
+
+        # First, initialize the database
+        result = subprocess.run(
+            ["uv", "run", "replay", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Initialized" in result.stdout
+
+        # Add a document
+        result = subprocess.run(
+            ["uv", "run", "replay", "--data-dir", str(data_dir), "add", "--text", "test document"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Verify document count is 1
+        result = subprocess.run(
+            ["uv", "run", "replay", "--data-dir", str(data_dir), "stats"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Documents: 1" in result.stdout
+
+        # Now reinitialize with --force
+        result = subprocess.run(
+            ["uv", "run", "replay", "--data-dir", str(data_dir), "init", "--force", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Reinitialized" in result.stdout
+
+        # Verify document count is now 0 (data was cleared)
+        result = subprocess.run(
+            ["uv", "run", "replay", "--data-dir", str(data_dir), "stats"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Documents: 0" in result.stdout
 
     def test_stats_exits_nonzero_when_not_initialized(self):
         """replay stats should exit with non-zero when not initialized."""

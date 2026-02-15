@@ -167,3 +167,120 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
     second_state = json.loads(state_file.read_text())
     assert second_state["last_indexed_commit"] == "c3"
     assert "c2" in controller.indexed_hashes
+
+
+# Tests for hook generation and detection (tickets replay-0d6.4 and replay-0d6.5)
+
+
+def test_is_replay_hook_detects_bare_replay():
+    """Hook detection should recognize bare 'replay commit-index'."""
+    from replay.cli import _is_replay_hook
+
+    content = '''#!/bin/sh
+# Replay post-commit hook - automatically indexes commits
+replay commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_replay_hook(content) is True
+
+
+def test_is_replay_hook_detects_python_m_replay():
+    """Hook detection should recognize 'python -m replay commit-index'."""
+    from replay.cli import _is_replay_hook
+
+    content = '''#!/bin/sh
+# Replay post-commit hook - automatically indexes commits
+python -m replay commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_replay_hook(content) is True
+
+
+def test_is_replay_hook_detects_with_data_dir_arg():
+    """Hook detection should recognize hooks with --data-dir argument."""
+    from replay.cli import _is_replay_hook
+
+    content = '''#!/bin/sh
+# Replay post-commit hook - automatically indexes commits
+replay --data-dir /path/to/data commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_replay_hook(content) is True
+
+
+def test_is_replay_hook_detects_python_m_with_data_dir():
+    """Hook detection should recognize 'python -m replay --data-dir' hooks."""
+    from replay.cli import _is_replay_hook
+
+    content = '''#!/bin/sh
+# Replay post-commit hook - automatically indexes commits
+python -m replay --data-dir "/path/with spaces/data" commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_replay_hook(content) is True
+
+
+def test_is_replay_hook_rejects_non_replay_hooks():
+    """Hook detection should reject non-Replay hooks."""
+    from replay.cli import _is_replay_hook
+
+    content = '''#!/bin/sh
+# Some other hook
+other-tool commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_replay_hook(content) is False
+
+
+def test_is_replay_hook_rejects_partial_matches():
+    """Hook detection should reject partial matches like 'preplay commit-index'."""
+    from replay.cli import _is_replay_hook
+
+    content = '''#!/bin/sh
+preplay commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_replay_hook(content) is False
+
+
+def test_hook_generation_uses_python_m_replay(tmp_path):
+    """Generated hooks should use 'python -m replay' for PATH independence."""
+    # Create a minimal git repo
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    (repo_path / ".git").mkdir()
+
+    result = runner.invoke(cli.app, ["hook", "install", "--repo", str(repo_path)])
+
+    assert result.exit_code == 0
+
+    hook_path = repo_path / ".git" / "hooks" / "post-commit"
+    assert hook_path.exists()
+
+    hook_content = hook_path.read_text()
+    assert "python -m replay" in hook_content
+    assert "replay commit-index" in hook_content
+
+
+def test_hook_generation_quotes_data_dir(tmp_path):
+    """Generated hooks should quote --data-dir path for space handling."""
+    # Create a minimal git repo
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    (repo_path / ".git").mkdir()
+
+    # Create a data dir with spaces
+    data_dir = tmp_path / "data dir"
+    data_dir.mkdir()
+
+    # Set the data dir globally
+    cli.set_data_dir(data_dir)
+
+    try:
+        result = runner.invoke(cli.app, ["hook", "install", "--repo", str(repo_path)])
+
+        assert result.exit_code == 0
+
+        hook_path = repo_path / ".git" / "hooks" / "post-commit"
+        assert hook_path.exists()
+
+        hook_content = hook_path.read_text()
+        # Check that the path is quoted
+        assert '--data-dir "' in hook_content
+        assert str(data_dir) in hook_content
+    finally:
+        cli.set_data_dir(None)
