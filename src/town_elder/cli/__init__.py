@@ -847,40 +847,50 @@ def commit_index(  # noqa: PLR0912, PLR0913
                 commit_hashes = [c.hash for c in batch_commits]
                 diffs = git.get_diffs_batch(commit_hashes, max_size=max_diff_size)
 
+                # Prepare all commit data for batch embedding
+                commit_data: list[tuple[object, str]] = []
                 for commit in batch_commits:
                     try:
-                        # Get the diff from batch result
                         diff = diffs.get(commit.hash, "")
                         diff_text = diff_parser.parse_diff_to_text(diff)
 
-                        # Check if truncated
                         if "[truncated" in diff:
                             diff_text += " [diff was truncated due to size]"
 
-                        # Combine with commit message
                         text = f"Commit: {commit.message}\n\n{diff_text}"
-
-                        # Index
-                        doc_id = f"commit_{commit.hash}"
-                        vector = embedder.embed_single(text)
-                        store.insert(
-                            doc_id, vector, text,
-                            {
-                                "type": "commit",
-                                "hash": commit.hash,
-                                "author": commit.author,
-                                "message": commit.message,
-                            }
-                        )
-                        indexed_count += 1
-                        if not frontier_blocked:
-                            frontier_commit_hash = commit.hash
-                        progress.advance(task)
+                        commit_data.append((commit, text))
                     except Exception as e:
                         error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
                         skipped_count += 1
-                        frontier_blocked = True
                         progress.advance(task)
+
+                # Batch generate embeddings for all valid commits in this batch
+                if commit_data:
+                    texts = [text for _, text in commit_data]
+                    embeddings = list(embedder.embed(texts))
+
+                    # Insert embeddings into store
+                    for (commit, text), vector in zip(commit_data, embeddings):
+                        try:
+                            doc_id = f"commit_{commit.hash}"
+                            store.insert(
+                                doc_id, vector, text,
+                                {
+                                    "type": "commit",
+                                    "hash": commit.hash,
+                                    "author": commit.author,
+                                    "message": commit.message,
+                                }
+                            )
+                            indexed_count += 1
+                            if not frontier_blocked:
+                                frontier_commit_hash = commit.hash
+                        except Exception as e:
+                            error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                            skipped_count += 1
+                            frontier_blocked = True
+                        finally:
+                            progress.advance(task)
 
                 # Save checkpoint after each batch (resumable)
                 if frontier_commit_hash and sentinel_found:
