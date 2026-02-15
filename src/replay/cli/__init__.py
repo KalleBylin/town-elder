@@ -1,6 +1,7 @@
 """CLI entry point for replay."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -445,8 +446,6 @@ def index(
     Recursively indexes all .py and .md files in the specified directory.
     Excludes .git, .venv, __pycache__, node_modules, and other common ignore patterns.
     """
-    import uuid
-
     config = get_config(data_dir=_data_dir)
 
     # Validate that database is initialized
@@ -508,9 +507,12 @@ def index(
                     skipped_count += 1
                     continue
                 text = file.read_text()
-                doc_id = str(uuid.uuid4())
+                # Use stable ID based on file path hash for idempotent indexing
+                # zvec requires alphanumeric doc_ids, so we hash the path
+                file_path_str = str(file)
+                doc_id = hashlib.sha256(file_path_str.encode()).hexdigest()[:16]
                 vector = embedder.embed_single(text)
-                store.insert(
+                store.upsert(
                     doc_id, vector, text,
                     {"source": str(file), "type": file.suffix}
                 )
