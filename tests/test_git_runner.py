@@ -153,6 +153,50 @@ class TestGitRunnerGetCommits:
         assert new_file_commit is not None
         assert len(new_file_commit.files_changed) > 0
 
+    def test_get_commits_handles_legacy_delimiter_in_subject(self, temp_git_repo: Path):
+        """get_commits should correctly parse subjects containing literal delimiters."""
+        runner = GitRunner(repo_path=temp_git_repo)
+        message = "fix parser ||| edge case"
+        (temp_git_repo / "delimiter_subject.txt").write_text("delimiter collision content")
+        subprocess.run(["git", "add", "."], cwd=temp_git_repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+
+        commits = runner.get_commits(limit=10)
+        matching_commits = [c for c in commits if c.message == message]
+        assert len(matching_commits) == 1
+        commit = matching_commits[0]
+        assert commit.hash
+        assert commit.author == "Test User"
+        assert isinstance(commit.date, datetime)
+        assert "delimiter_subject.txt" in commit.files_changed
+
+    def test_get_commits_handles_unicode_and_punctuation_subject(self, temp_git_repo: Path):
+        """get_commits should preserve unusual punctuation and Unicode in subject."""
+        runner = GitRunner(repo_path=temp_git_repo)
+        message = "feat: café naïve punctuation!? []{}<>|~"
+        (temp_git_repo / "unicode_subject.txt").write_text("unicode subject content")
+        subprocess.run(["git", "add", "."], cwd=temp_git_repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+
+        commits = runner.get_commits(limit=10)
+        matching_commits = [c for c in commits if c.message == message]
+        assert len(matching_commits) == 1
+        commit = matching_commits[0]
+        assert commit.hash
+        assert commit.author == "Test User"
+        assert isinstance(commit.date, datetime)
+        assert "unicode_subject.txt" in commit.files_changed
+
 
 class TestGitRunnerGetDiff:
     """Tests for get_diff method."""

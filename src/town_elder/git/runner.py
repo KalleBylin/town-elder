@@ -8,6 +8,8 @@ from pathlib import Path
 
 # Minimum parts expected in git log format output
 _MIN_LOG_PARTS = 4
+_LOG_FIELD_SEPARATOR = "\x1f"
+_LOG_RECORD_SEPARATOR = "\x1e"
 
 
 @dataclass
@@ -63,7 +65,7 @@ class GitRunner:
         Returns:
             List of Commit objects.
         """
-        args = ["log", "-n", str(limit), "--format=%H|||%s|||%an|||%ad|||%f", "--date=iso"]
+        args = ["log", "-n", str(limit), "--format=%H%x1f%s%x1f%an%x1f%aI%x1e"]
         if since:
             args.extend([f"--since={since}"])
         if offset > 0:
@@ -72,15 +74,12 @@ class GitRunner:
         output = self._run_git(args)
         commits = []
 
-        for line in output.split("\n"):
-            if not line.strip():
+        for record in output.split(_LOG_RECORD_SEPARATOR):
+            if not record.strip():
                 continue
-            parts = line.split("|||")
+            parts = record.rstrip("\n").split(_LOG_FIELD_SEPARATOR)
             if len(parts) >= _MIN_LOG_PARTS:
-                commit_hash = parts[0]
-                message = parts[1]
-                author = parts[2]
-                date_str = parts[3]
+                commit_hash, message, author, date_str = parts[:_MIN_LOG_PARTS]
 
                 # Parse the date from git's iso format
                 date = datetime.fromisoformat(date_str)
