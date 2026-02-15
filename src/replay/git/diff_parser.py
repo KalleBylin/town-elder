@@ -4,6 +4,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+# Minimum parts expected in a "diff --git a/path b/path" line
+_MIN_DIFF_LINE_PARTS = 4
+
 
 @dataclass
 class DiffFile:
@@ -16,7 +19,7 @@ class DiffFile:
 class DiffParser:
     """Parser for git diff output."""
 
-    def parse(self, diff_output: str) -> Iterator[DiffFile]:
+    def parse(self, diff_output: str) -> Iterator[DiffFile]:  # noqa: PLR0912
         """Parse git diff output into file changes."""
         current_file = None
         current_status = None
@@ -36,13 +39,10 @@ class DiffParser:
 
                 # Parse the file path from "diff --git a/path b/path"
                 parts = line.split()
-                if len(parts) >= 4:
+                if len(parts) >= _MIN_DIFF_LINE_PARTS:
                     # Get the "b/" path
                     b_path = parts[-1]
-                    if b_path.startswith("b/"):
-                        current_file = b_path[2:]
-                    else:
-                        current_file = b_path
+                    current_file = b_path[2:] if b_path.startswith("b/") else b_path
                 current_status = None
                 current_hunks = []
                 current_hunk_lines = []

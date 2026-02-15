@@ -100,7 +100,7 @@ def _escape_rich(text: str) -> str:
     return text.replace("[", "\\[").replace("]", "\\]")
 
 
-def _run_search(
+def _run_search(  # noqa: PLR0913
     ctx: typer.Context,
     query: str,
     top_k: int,
@@ -208,7 +208,7 @@ def main(
 
 
 @app.command()
-def init(
+def init(  # noqa: PLR0912
     ctx: typer.Context,
     path: str = typer.Option(
         ".",
@@ -317,7 +317,7 @@ python -m replay --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --
 
 
 @app.command()
-def search(
+def search(  # noqa: PLR0912, PLR0913
     ctx: typer.Context,
     query: str = typer.Argument(..., help="Search query text"),
     top_k: int = typer.Option(
@@ -350,7 +350,7 @@ def search(
 
 
 @app.command("query")
-def query(
+def query(  # noqa: PLR0912, PLR0913
     ctx: typer.Context,
     query: str = typer.Argument(..., help="Search query text"),
     top_k: int = typer.Option(
@@ -471,7 +471,7 @@ def status(ctx: typer.Context) -> None:
 
 
 @app.command()
-def index(
+def index(  # noqa: PLR0912
     ctx: typer.Context,
     path: str = typer.Argument(".", help="Path to directory to index (default: current directory)"),
     exclude: list[str] = typer.Option(
@@ -580,7 +580,7 @@ def index(
 
 
 @app.command()
-def commit_index(
+def commit_index(  # noqa: PLR0912
     ctx: typer.Context,
     path: str = typer.Option(
         ".",

@@ -68,8 +68,4 @@ def get_config(data_dir: str | Path | None = None, clear_cache: bool = False) ->
     if clear_cache:
         get_config.cache_clear()
 
-    if data_dir:
-        config = ReplayConfig(data_dir=Path(data_dir))
-    else:
-        config = ReplayConfig()
-    return config
+    return ReplayConfig(data_dir=Path(data_dir)) if data_dir else ReplayConfig()

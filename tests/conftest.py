@@ -45,11 +45,13 @@ def sample_vector_store(temp_dir: Path) -> ZvecStore:
     """Create a sample vector store instance."""
     store = ZvecStore(path=temp_dir / "test.vec", dimension=384)
     yield store
-    # Ensure proper cleanup before temp directory is removed
-    try:
+    # Best-effort cleanup before temp directory removal.
+    # Ignoring close errors here is intentional: if a test fails and leaves the store
+    # in a broken state, we don't want that to mask the actual test failure.
+    try:  # noqa: SIM105
         store.close()
     except Exception:
-        pass  # Ignore errors during cleanup
+        pass
 
 
 @pytest.fixture

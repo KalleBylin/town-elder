@@ -24,9 +24,7 @@ class QueryService:
         top_k = top_k or config.default_top_k
 
         query_vector = self.embedder.embed_single(query)
-        results = self.store.search(query_vector, top_k=top_k)
-
-        return results
+        return self.store.search(query_vector, top_k=top_k)
 
     def close(self) -> None:
         """Close the service."""

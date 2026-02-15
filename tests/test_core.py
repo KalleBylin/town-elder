@@ -2,11 +2,18 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from replay.embeddings.embedder import Embedder
 from replay.git.diff_parser import DiffFile, DiffParser
 from replay.storage.vector_store import ZvecStore
+
+# Test constants
+_DEFAULT_EMBED_DIMENSION = 384
+_ALT_EMBED_DIMENSION = 256  # Used for testing schema mismatch
+_DEFAULT_TOP_K = 5
+_MIN_TOP_K = 2
+_MAX_TOP_K = 5
+_EXPECTED_DIFF_FILE_COUNT = 3
 
 
 class TestEmbedder:
@@ -16,7 +23,7 @@ class TestEmbedder:
         """Test that Embedder can be instantiated with default model."""
         embedder = Embedder()
         assert embedder.model_name == Embedder.DEFAULT_MODEL
-        assert embedder.dimension == 384
+        assert embedder.dimension == _DEFAULT_EMBED_DIMENSION
 
     def test_embedder_custom_model(self):
         """Test that Embedder can be instantiated with custom model."""
@@ -26,14 +33,14 @@ class TestEmbedder:
     def test_embedder_dimension_property(self):
         """Test that dimension property returns correct value."""
         embedder = Embedder()
-        assert embedder.dimension == 384
+        assert embedder.dimension == _DEFAULT_EMBED_DIMENSION
 
     def test_embed_single(self):
         """Test embedding a single text returns a vector."""
         embedder = Embedder()
         vector = embedder.embed_single("hello world")
         assert isinstance(vector, np.ndarray)
-        assert vector.shape == (384,)
+        assert vector.shape == (_DEFAULT_EMBED_DIMENSION,)
 
 
 class TestVectorStore:
@@ -41,8 +48,8 @@ class TestVectorStore:
 
     def test_vector_store_instantiation(self, temp_dir):
         """Test that VectorStore can be instantiated."""
-        store = ZvecStore(path=temp_dir / "test.vec", dimension=384)
-        assert store.dimension == 384
+        store = ZvecStore(path=temp_dir / "test.vec", dimension=_DEFAULT_EMBED_DIMENSION)
+        assert store.dimension == _DEFAULT_EMBED_DIMENSION
         assert store.count() == 0
 
     def test_vector_store_insert(self, sample_vector_store, sample_vectors):
@@ -98,9 +105,9 @@ class TestVectorStore:
 
         # Search with a vector similar to doc0 and doc1
         query = sample_vectors[0]  # Similar to doc0 and doc1
-        results = sample_vector_store.search(query, top_k=2)
+        results = sample_vector_store.search(query, top_k=_MIN_TOP_K)
 
-        assert len(results) == 2
+        assert len(results) == _MIN_TOP_K
         # First result should be doc0 (exact match)
         assert results[0]["id"] == "doc0"
         assert results[0]["score"] > 0
@@ -116,11 +123,11 @@ class TestVectorStore:
                 metadata={"index": i}
             )
 
-        results = sample_vector_store.search(sample_vectors[0], top_k=2)
-        assert len(results) == 2
+        results = sample_vector_store.search(sample_vectors[0], top_k=_MIN_TOP_K)
+        assert len(results) == _MIN_TOP_K
 
-        results = sample_vector_store.search(sample_vectors[0], top_k=5)
-        assert len(results) == 5
+        results = sample_vector_store.search(sample_vectors[0], top_k=_MAX_TOP_K)
+        assert len(results) == _MAX_TOP_K
 
     def test_vector_store_delete(self, sample_vector_store, sample_vectors):
         """Test deleting a document."""
@@ -146,7 +153,7 @@ class TestVectorStore:
         assert not store_path.exists()
 
         # Opening should create a new collection
-        store = ZvecStore(path=store_path, dimension=384)
+        store = ZvecStore(path=store_path, dimension=_DEFAULT_EMBED_DIMENSION)
         assert store.count() == 0
         store.close()
 
@@ -159,7 +166,7 @@ class TestVectorStore:
         (store_path / "_metadata").write_bytes(b"invalid corrupted data")
 
         # Opening should raise VectorStoreError with actionable message
-        store = ZvecStore(path=store_path, dimension=384)
+        store = ZvecStore(path=store_path, dimension=_DEFAULT_EMBED_DIMENSION)
         try:
             store.count()
             assert False, "Expected VectorStoreError to be raised"
@@ -178,13 +185,13 @@ class TestVectorStore:
         store_path = temp_dir / "permissions.vec"
 
         # Create a store, then try to open it in a way that would fail
-        store = ZvecStore(path=store_path, dimension=384)
+        store = ZvecStore(path=store_path, dimension=_DEFAULT_EMBED_DIMENSION)
         store.insert(doc_id="test", vector=sample_vectors[0], text="test", metadata={})
         store.close()
 
         # Now try to open with wrong dimension - this should fail meaningfully
         # (different dimension = schema mismatch)
-        wrong_dim_store = ZvecStore(path=store_path, dimension=256)
+        wrong_dim_store = ZvecStore(path=store_path, dimension=_ALT_EMBED_DIMENSION)
         try:
             wrong_dim_store.count()
             # If it doesn't raise, the old behavior (silent recreate) happened
@@ -211,7 +218,7 @@ class TestDiffParser:
         files = list(diff_parser.parse(sample_diff_output))
 
         # Should have 3 files: new, deleted, modified
-        assert len(files) == 3
+        assert len(files) == _EXPECTED_DIFF_FILE_COUNT
 
         # First file should be new
         new_file = files[0]

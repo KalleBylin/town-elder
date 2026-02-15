@@ -22,7 +22,7 @@ def test_query_alias_executes_via_shared_helper(monkeypatch):
     """`replay query` should dispatch through the shared search helper."""
     calls: list[tuple[str, int, str | None, str | None, str | None]] = []
 
-    def fake_run_search(
+    def fake_run_search(  # noqa: PLR0913
         ctx,
         query: str,
         top_k: int,
@@ -462,6 +462,7 @@ def test_data_dir_not_leaked_across_invocations(tmp_path):
     This test verifies that explicit --data-dir is properly scoped per-invocation.
     """
     from pathlib import Path
+
     from typer.testing import CliRunner
 
     # Clear any stale global state before running this test

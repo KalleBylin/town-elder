@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+# Minimum parts expected in git log format output
+_MIN_LOG_PARTS = 4
+
 
 @dataclass
 class Commit:
@@ -73,7 +76,7 @@ class GitRunner:
             if not line.strip():
                 continue
             parts = line.split("|||")
-            if len(parts) >= 4:
+            if len(parts) >= _MIN_LOG_PARTS:
                 commit_hash = parts[0]
                 message = parts[1]
                 author = parts[2]
