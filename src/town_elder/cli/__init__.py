@@ -15,6 +15,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from town_elder import __version__
 from town_elder.cli_services import (
     EXIT_ERROR,
     EXIT_INVALID_ARG,
@@ -307,11 +308,21 @@ def main(
         "-d",
         help="Data directory (default: .town_elder in current directory)",
     ),
+    version: bool | None = typer.Option(
+        None,
+        "--version",
+        help="Show version information",
+        is_flag=True,
+    ),
 ):
     """te - Semantic memory for AI agents.
 
     A local-first semantic memory CLI for AI coding agents.
     """
+    if version:
+        console.print(f"te version {__version__}")
+        raise typer.Exit(code=EXIT_SUCCESS)
+
     # Use invocation-scoped context instead of global to prevent data-dir leakage
     ctx.obj = CLIContext(data_dir=Path(data_dir).expanduser() if data_dir else None)
 
