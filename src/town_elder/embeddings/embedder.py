@@ -37,8 +37,7 @@ class Embedder:
                 else:
                     raise EmbeddingBackendUnavailableError(
                         f"Failed to load embedding backend: {e}. "
-                        "Install fastembed: pip install fastembed "
-                        "or use --allow-fallback to use zero vectors."
+                        "Install fastembed: pip install fastembed"
                     )
 
     def embed(self, texts: list[str]) -> Iterator[np.ndarray]:
