@@ -431,13 +431,9 @@ def init(  # noqa: PLR0912
 # Town Elder post-commit hook - automatically indexes commits
 # Try uv first, then te, then python -m town_elder
 
-if command -v uv >/dev/null 2>&1; then
-    uv run te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
-elif command -v te >/dev/null 2>&1; then
-    te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
-else
-    python -m town_elder --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
-fi
+command -v uv >/dev/null 2>&1 && uv run te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+command -v te >/dev/null 2>&1 && te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+python -m town_elder --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
 """
                     hook_path.write_text(hook_content)
                     os.chmod(hook_path, 0o755)
@@ -955,26 +951,18 @@ def install(
 # Town Elder post-commit hook - automatically indexes commits
 # Try uv first, then te, then python -m town_elder
 
-if command -v uv >/dev/null 2>&1; then
-    uv run te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
-elif command -v te >/dev/null 2>&1; then
-    te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
-else
-    python -m town_elder {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
-fi
+command -v uv >/dev/null 2>&1 && uv run te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+command -v te >/dev/null 2>&1 && te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+python -m town_elder {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
 """
     else:
         hook_content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 # Try uv first, then te, then python -m town_elder
 
-if command -v uv >/dev/null 2>&1; then
-    uv run te commit-index --repo "$(git rev-parse --show-toplevel)"
-elif command -v te >/dev/null 2>&1; then
-    te commit-index --repo "$(git rev-parse --show-toplevel)"
-else
-    python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
-fi
+command -v uv >/dev/null 2>&1 && uv run te commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+command -v te >/dev/null 2>&1 && te commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
 """
 
     hook_path.write_text(hook_content)
