@@ -17,24 +17,27 @@ def temp_git_repo() -> Iterator[Path]:
         repo_path = Path(tmp) / "test_repo"
         repo_path.mkdir()
         # Initialize git repo
-        subprocess.run(["git", "init"], cwd=repo_path, capture_output=True)
+        subprocess.run(["git", "init"], cwd=repo_path, capture_output=True, check=True)
         subprocess.run(
             ["git", "config", "user.email", "test@test.com"],
             cwd=repo_path,
             capture_output=True,
+            check=True,
         )
         subprocess.run(
             ["git", "config", "user.name", "Test User"],
             cwd=repo_path,
             capture_output=True,
+            check=True,
         )
         # Create initial commit
         (repo_path / "test.txt").write_text("initial content")
-        subprocess.run(["git", "add", "."], cwd=repo_path, capture_output=True)
+        subprocess.run(["git", "add", "."], cwd=repo_path, capture_output=True, check=True)
         subprocess.run(
             ["git", "commit", "-m", "initial commit"],
             cwd=repo_path,
             capture_output=True,
+            check=True,
         )
         yield repo_path
 
@@ -378,6 +381,7 @@ class TestMetadataValidation:
             ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
             capture_output=True,
             text=True,
+            check=True,
         )
 
         result = subprocess.run(
@@ -396,6 +400,7 @@ class TestMetadataValidation:
             ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
             capture_output=True,
             text=True,
+            check=True,
         )
 
         metadata = json.dumps({"source": "test", "type": "example"})
@@ -414,6 +419,7 @@ class TestMetadataValidation:
             ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
             capture_output=True,
             text=True,
+            check=True,
         )
 
         # Test with a JSON array (list)
@@ -434,6 +440,7 @@ class TestMetadataValidation:
             ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
             capture_output=True,
             text=True,
+            check=True,
         )
 
         # Test with a JSON string

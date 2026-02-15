@@ -395,9 +395,8 @@ class TestHookExecution:
         This is a true integration test that verifies actual hook-triggered
         side effects (index state file creation) rather than mocking.
         """
-        import subprocess
         import os
-        import shutil
+        import subprocess
 
         # Create a git repo
         repo_path = tmp_path / "repo"
@@ -405,16 +404,18 @@ class TestHookExecution:
         (repo_path / ".git").mkdir()
 
         # Configure git
-        subprocess.run(["git", "init"], cwd=repo_path, capture_output=True)
+        subprocess.run(["git", "init"], cwd=repo_path, capture_output=True, check=True)
         subprocess.run(
             ["git", "config", "user.email", "test@test.com"],
             cwd=repo_path,
             capture_output=True,
+            check=True,
         )
         subprocess.run(
             ["git", "config", "user.name", "Test User"],
             cwd=repo_path,
             capture_output=True,
+            check=True,
         )
 
         # Create a data dir (but don't create it - init will create it)
@@ -454,11 +455,12 @@ uv run te --data-dir "{data_dir}" commit-index --repo "{repo_path}"
 
             # Make a commit (this should trigger the hook)
             (repo_path / "test.txt").write_text("test content")
-            subprocess.run(["git", "add", "."], cwd=repo_path, capture_output=True)
+            subprocess.run(["git", "add", "."], cwd=repo_path, capture_output=True, check=True)
             subprocess.run(
                 ["git", "commit", "-m", "test commit"],
                 cwd=repo_path,
                 capture_output=True,
+                check=True,
             )
 
             # Verify the hook executed by checking real side effects:
@@ -647,7 +649,7 @@ class TestConfigErrorHandling:
         import subprocess
 
         # Create a git repo so hook install doesn't fail on "not a git repo" first
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
 
         result = self._run_te(tmp_path, "hook", "install")
 
