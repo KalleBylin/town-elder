@@ -539,3 +539,130 @@ def test_data_dir_not_leaked_across_invocations(tmp_path):
         assert data_dir_2.name in result5.output
         # And should NOT contain data_dir_1
         assert data_dir_1.name not in result5.output
+
+
+class TestConfigErrorHandling:
+    """Tests for friendly error messages when database is not initialized.
+
+    Regression tests for: te-qi6
+    Previously, commands like stats/search/export/hook install raised ConfigError
+    with Python tracebacks when run in directories without .town_elder.
+    Now they show friendly CLI errors with actionable guidance.
+    """
+
+    def test_stats_shows_friendly_error_when_not_initialized(self, tmp_path):
+        """te stats should show friendly error, not traceback, when not initialized."""
+        import subprocess
+
+        # Run in a non-initialized directory
+        result = subprocess.run(
+            ["uv", "run", "te", "stats"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+
+        # Should fail with non-zero exit
+        assert result.returncode != 0
+
+        # Should NOT contain Python traceback
+        assert "Traceback (most recent call last)" not in result.stderr
+        assert "Traceback (most recent call last)" not in result.stdout
+
+        # Should show friendly error message (error goes to stderr, guidance to stdout)
+        assert "Error: Database not initialized" in result.stderr
+        assert "te init" in result.stdout
+
+    def test_search_shows_friendly_error_when_not_initialized(self, tmp_path):
+        """te search should show friendly error, not traceback, when not initialized."""
+        import subprocess
+
+        result = subprocess.run(
+            ["uv", "run", "te", "search", "test query"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "Traceback (most recent call last)" not in result.stderr
+        assert "Traceback (most recent call last)" not in result.stdout
+        assert "Error: Database not initialized" in result.stderr
+
+    def test_query_shows_friendly_error_when_not_initialized(self, tmp_path):
+        """te query should show friendly error, not traceback, when not initialized."""
+        import subprocess
+
+        result = subprocess.run(
+            ["uv", "run", "te", "query", "test query"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "Traceback (most recent call last)" not in result.stderr
+        assert "Error: Database not initialized" in result.stderr
+
+    def test_status_shows_friendly_error_when_not_initialized(self, tmp_path):
+        """te status should show friendly error, not traceback, when not initialized."""
+        import subprocess
+
+        result = subprocess.run(
+            ["uv", "run", "te", "status"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "Traceback (most recent call last)" not in result.stderr
+        assert "Error: Database not initialized" in result.stderr
+
+    def test_export_shows_friendly_error_when_not_initialized(self, tmp_path):
+        """te export should show friendly error, not traceback, when not initialized."""
+        import subprocess
+
+        result = subprocess.run(
+            ["uv", "run", "te", "export"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "Traceback (most recent call last)" not in result.stderr
+        assert "Error: Database not initialized" in result.stderr
+
+    def test_hook_install_shows_friendly_error_when_not_initialized(self, tmp_path):
+        """te hook install should show friendly error, not traceback, when not initialized."""
+        import subprocess
+
+        # Create a git repo so hook install doesn't fail on "not a git repo" first
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+
+        result = subprocess.run(
+            ["uv", "run", "te", "hook", "install"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "Traceback (most recent call last)" not in result.stderr
+        assert "Error: Database not initialized" in result.stderr
+
+    def test_error_message_instructs_to_use_data_dir_option(self, tmp_path):
+        """Error messages should guide users to use --data-dir option."""
+        import subprocess
+
+        result = subprocess.run(
+            ["uv", "run", "te", "stats"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        # Should mention --data-dir as an option (guidance goes to stdout)
+        assert "--data-dir" in result.stdout

@@ -107,8 +107,15 @@ def _run_search(  # noqa: PLR0913
     since: str | None,
 ) -> None:
     """Shared implementation for search-style commands."""
+    from town_elder.exceptions import ConfigError
+
     data_dir = _get_data_dir_from_context(ctx)
-    config = get_config(data_dir=data_dir)
+    try:
+        config = get_config(data_dir=data_dir)
+    except ConfigError as e:
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print(f"[dim]{e}[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
@@ -150,8 +157,15 @@ def _run_search(  # noqa: PLR0913
 
 def _run_stats(ctx: typer.Context) -> None:
     """Shared implementation for stats-style commands."""
+    from town_elder.exceptions import ConfigError
+
     data_dir = _get_data_dir_from_context(ctx)
-    config = get_config(data_dir=data_dir)
+    try:
+        config = get_config(data_dir=data_dir)
+    except ConfigError as e:
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print(f"[dim]{e}[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
@@ -806,8 +820,15 @@ def install(
             console.print("Use --force to overwrite anyway")
 
     # Get the data directory from context (invocation-scoped)
+    from town_elder.exceptions import ConfigError
+
     data_dir = _get_data_dir_from_context(ctx)
-    config = get_config(data_dir=data_dir)
+    try:
+        config = get_config(data_dir=data_dir)
+    except ConfigError as e:
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print(f"[dim]{e}[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
 
     # Determine the data_dir to use in the hook - use absolute path for reliability
     # Use python -m town_elder for robustness across uv/pyenv environments
@@ -895,7 +916,7 @@ app.add_typer(hook_app, name="hook")
 
 
 @app.command()
-def export(
+def export(  # noqa: PLR0912
     ctx: typer.Context,
     output: str = typer.Option(
         "-",
@@ -919,8 +940,15 @@ def export(
 
     Exports all documents from the vector store to JSON or JSONL format.
     """
+    from town_elder.exceptions import ConfigError
+
     data_dir = _get_data_dir_from_context(ctx)
-    config = get_config(data_dir=data_dir)
+    try:
+        config = get_config(data_dir=data_dir)
+    except ConfigError as e:
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print(f"[dim]{e}[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
