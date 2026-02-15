@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from replay.embeddings.embedder import Embedder
 from replay.git.diff_parser import DiffFile, DiffParser
@@ -44,18 +45,9 @@ class TestVectorStore:
         assert store.dimension == 384
         assert store.count() == 0
 
-    def test_vector_store_insert(self, sample_vector_store):
-        """Test inserting a document."""
-        doc_id = sample_vector_store.insert(
-            text="test document",
-            metadata={"source": "test", "type": "example"}
-        )
-        assert doc_id is not None
-        assert sample_vector_store.count() == 1
-
-    def test_vector_store_insert_with_vector(self, sample_vector_store, sample_vectors):
+    def test_vector_store_insert(self, sample_vector_store, sample_vectors):
         """Test inserting a document with pre-computed vector."""
-        doc_id = sample_vector_store.insert_with_vector(
+        doc_id = sample_vector_store.insert(
             doc_id="doc1",
             vector=sample_vectors[0],
             text="test document",
@@ -64,9 +56,11 @@ class TestVectorStore:
         assert doc_id == "doc1"
         assert sample_vector_store.count() == 1
 
-    def test_vector_store_get(self, sample_vector_store):
+    def test_vector_store_get(self, sample_vector_store, sample_vectors):
         """Test getting a document by ID."""
         doc_id = sample_vector_store.insert(
+            doc_id="test-doc",
+            vector=sample_vectors[0],
             text="test document",
             metadata={"source": "test"}
         )
@@ -83,19 +77,19 @@ class TestVectorStore:
     def test_vector_store_search(self, sample_vector_store, sample_vectors):
         """Test searching for similar documents."""
         # Insert multiple documents with vectors
-        sample_vector_store.insert_with_vector(
+        sample_vector_store.insert(
             doc_id="doc0",
             vector=sample_vectors[0],
             text="document about cats",
             metadata={"type": "animal"}
         )
-        sample_vector_store.insert_with_vector(
+        sample_vector_store.insert(
             doc_id="doc1",
             vector=sample_vectors[1],
             text="document about felines",
             metadata={"type": "animal"}
         )
-        sample_vector_store.insert_with_vector(
+        sample_vector_store.insert(
             doc_id="doc2",
             vector=sample_vectors[2],
             text="document about cars",
@@ -115,7 +109,7 @@ class TestVectorStore:
         """Test that search respects top_k parameter."""
         # Insert multiple documents
         for i, vec in enumerate(sample_vectors):
-            sample_vector_store.insert_with_vector(
+            sample_vector_store.insert(
                 doc_id=f"doc{i}",
                 vector=vec,
                 text=f"document {i}",
@@ -128,9 +122,11 @@ class TestVectorStore:
         results = sample_vector_store.search(sample_vectors[0], top_k=5)
         assert len(results) == 5
 
-    def test_vector_store_delete(self, sample_vector_store):
+    def test_vector_store_delete(self, sample_vector_store, sample_vectors):
         """Test deleting a document."""
         doc_id = sample_vector_store.insert(
+            doc_id="test-doc",
+            vector=sample_vectors[0],
             text="test document",
             metadata={}
         )
@@ -173,7 +169,7 @@ class TestVectorStore:
         finally:
             store.close()
 
-    def test_vector_store_no_implicit_create_on_permission_error(self, temp_dir):
+    def test_vector_store_no_implicit_create_on_permission_error(self, temp_dir, sample_vectors):
         """Test that permission errors are surfaced, not masked by implicit create."""
         # This test simulates a permission error scenario
         # In practice, this would require OS-level permission manipulation
@@ -183,7 +179,7 @@ class TestVectorStore:
 
         # Create a store, then try to open it in a way that would fail
         store = ZvecStore(path=store_path, dimension=384)
-        store.insert("test", {})
+        store.insert(doc_id="test", vector=sample_vectors[0], text="test", metadata={})
         store.close()
 
         # Now try to open with wrong dimension - this should fail meaningfully

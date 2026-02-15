@@ -402,7 +402,7 @@ def add(
         vector = embedder.embed_single(text)
 
         # Store
-        store.insert_with_vector(doc_id, vector, text, meta)
+        store.insert(doc_id, vector, text, meta)
     except Exception as e:
         console.print(f"[red]Error storing document:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
@@ -510,7 +510,7 @@ def index(
                 text = file.read_text()
                 doc_id = str(uuid.uuid4())
                 vector = embedder.embed_single(text)
-                store.insert_with_vector(
+                store.insert(
                     doc_id, vector, text,
                     {"source": str(file), "type": file.suffix}
                 )
@@ -672,7 +672,7 @@ def commit_index(
                 # Index
                 doc_id = f"commit_{commit.hash}"
                 vector = embedder.embed_single(text)
-                store.insert_with_vector(
+                store.insert(
                     doc_id, vector, text,
                     {
                         "type": "commit",

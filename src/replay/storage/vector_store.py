@@ -87,29 +87,8 @@ class ZvecStore:
 
         return self._collection
 
-    def insert(self, text: str, metadata: dict[str, Any]) -> str:
+    def insert(self, doc_id: str, vector: np.ndarray, text: str, metadata: dict[str, Any]) -> str:
         """Insert a document with embedding."""
-        import json
-        import uuid
-
-        import zvec
-
-        doc_id = metadata.get("id", str(uuid.uuid4()))
-        vector = np.zeros(self.dimension, dtype=np.float32)
-        self._get_collection().insert(
-            zvec.Doc(
-                id=doc_id,
-                vectors={"embedding": vector.tolist()},
-                fields={
-                    "text": text,
-                    "metadata": json.dumps(metadata),
-                },
-            )
-        )
-        return doc_id
-
-    def insert_with_vector(self, doc_id: str, vector: np.ndarray, text: str, metadata: dict[str, Any]) -> str:
-        """Insert a document with pre-computed embedding."""
         import json
 
         import zvec

@@ -19,3 +19,8 @@ class EmbeddingError(ReplayError):
 class ConfigError(ReplayError):
     """Configuration errors."""
     pass
+
+
+class VectorError(ReplayError):
+    """Vector-related errors."""
+    pass

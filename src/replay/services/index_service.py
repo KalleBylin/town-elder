@@ -25,7 +25,7 @@ class IndexService:
         """Index a single text document."""
         metadata = metadata or {}
         vector = self.embedder.embed_single(text)
-        self.store.insert_with_vector(doc_id, vector, text, metadata)
+        self.store.insert(doc_id, vector, text, metadata)
         return doc_id
 
     def index_file(self, file_path: Path) -> str | None:

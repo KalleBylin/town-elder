@@ -84,7 +84,7 @@ class _FakeStore:
     def __init__(self, controller: _StoreController):
         self._controller = controller
 
-    def insert_with_vector(
+    def insert(
         self,
         doc_id: str,
         vector: list[float],
