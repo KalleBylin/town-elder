@@ -237,6 +237,11 @@ def _run_search(
     top_k: int,
 ) -> None:
     """Shared implementation for search-style commands."""
+    # Validate top_k
+    if top_k <= 0:
+        console.print(f"[red]Error:[/red] --top-k must be a positive integer, got {top_k}")
+        raise typer.Exit(code=EXIT_ERROR)
+
     with get_cli_services(ctx) as (svc, embedder, store):
         try:
             # Embed the query

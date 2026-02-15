@@ -780,6 +780,36 @@ class TestSearchErrorHandling:
             assert result.returncode != 0
             assert "not initialized" in result.stderr.lower()
 
+    def test_search_rejects_zero_top_k(self, temp_git_repo: Path):
+        """te search should reject --top-k=0."""
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(temp_git_repo / ".town_elder"), "search", "test", "--top-k", "0"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "positive integer" in result.stdout.lower()
+
+    def test_search_rejects_negative_top_k(self, temp_git_repo: Path):
+        """te search should reject negative --top-k values."""
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(temp_git_repo / ".town_elder"), "search", "test", "--top-k", "-1"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "positive integer" in result.stdout.lower()
+
+    def test_query_rejects_zero_top_k(self, temp_git_repo: Path):
+        """te query should reject --top-k=0."""
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(temp_git_repo / ".town_elder"), "query", "test", "--top-k", "0"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "positive integer" in result.stdout.lower()
+
 
 class TestHookStatus:
     """Tests for hook status command."""
