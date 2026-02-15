@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 import town_elder.cli as cli
+import town_elder.cli_services as cli_services
 from town_elder.git.runner import Commit
 
 runner = CliRunner()
@@ -181,8 +182,8 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
         _ = data_dir
         return factory
 
-    monkeypatch.setattr(cli, "get_config", fake_get_config)
-    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+    monkeypatch.setattr(cli_services, "get_config", fake_get_config)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
     first_result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "10"])
     assert first_result.exit_code == 0
@@ -219,8 +220,8 @@ def test_commit_index_respects_limit_without_all(monkeypatch, tmp_path):
         _ = data_dir
         return factory
 
-    monkeypatch.setattr(cli, "get_config", fake_get_config)
-    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+    monkeypatch.setattr(cli_services, "get_config", fake_get_config)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
     result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", str(_TEST_LIMIT)])
     assert result.exit_code == 0
@@ -250,8 +251,8 @@ def test_commit_index_advances_state_when_sentinel_found_after_pagination(monkey
         _ = data_dir
         return factory
 
-    monkeypatch.setattr(cli, "get_config", fake_get_config)
-    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+    monkeypatch.setattr(cli_services, "get_config", fake_get_config)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
     result = runner.invoke(
         cli.app,
@@ -410,8 +411,8 @@ def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monk
         _ = data_dir
         return factory
 
-    monkeypatch.setattr(cli, "get_config", fake_get_config)
-    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+    monkeypatch.setattr(cli_services, "get_config", fake_get_config)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
     result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
 
@@ -452,8 +453,8 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
         _ = data_dir
         return factory
 
-    monkeypatch.setattr(cli, "get_config", fake_get_config)
-    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+    monkeypatch.setattr(cli_services, "get_config", fake_get_config)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
     # First run: sentinel not found
     result1 = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
@@ -509,7 +510,7 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
         _ = data_dir
         return config
 
-    monkeypatch.setattr(cli, "get_config", fake_get_config)
+    monkeypatch.setattr(cli_services, "get_config", fake_get_config)
 
     # === Index Repo A ===
     controller_a = _StoreController(fail_hashes=set())
@@ -519,7 +520,7 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
         _ = data_dir
         return factory_a
 
-    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory_a)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory_a)
 
     result_a = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_a_path), "--limit", "10"])
     assert result_a.exit_code == 0
@@ -539,7 +540,7 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
         _ = data_dir
         return factory_b
 
-    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory_b)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory_b)
 
     result_b = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_b_path), "--limit", "10"])
     assert result_b.exit_code == 0
@@ -583,8 +584,8 @@ def test_commit_index_legacy_migration(monkeypatch, tmp_path):
         _ = data_dir
         return factory
 
-    monkeypatch.setattr(cli, "get_config", fake_get_config)
-    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+    monkeypatch.setattr(cli_services, "get_config", fake_get_config)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
     result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "10"])
     assert result.exit_code == 0

@@ -1,0 +1,220 @@
+"""CLI service layer for Town Elder.
+
+Provides consolidated service abstractions for CLI commands, eliminating
+duplicated config loading, validation, and service creation patterns.
+"""
+from __future__ import annotations
+
+from collections.abc import Generator
+from contextlib import contextmanager
+from pathlib import Path
+
+import typer
+from rich.console import Console
+
+from town_elder.config import TownElderConfig, get_config
+from town_elder.embeddings import Embedder
+from town_elder.exceptions import ConfigError
+from town_elder.git import DiffParser, GitRunner
+from town_elder.services import ServiceFactory, get_service_factory
+from town_elder.storage import ZvecStore
+
+# Exit codes
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
+EXIT_INVALID_ARG = 2
+
+console = Console(stderr=False)  # stdout for normal output
+error_console = Console(stderr=True)  # stderr for errors
+
+
+def _escape_rich(text: str) -> str:
+    """Escape brackets to prevent Rich markup interpretation."""
+    return text.replace("[", "\\[").replace("]", "\\]")
+
+
+class CLIContext:
+    """Invocation-scoped context for CLI state.
+
+    Replaces module-global _data_dir to prevent leakage across CLI invocations.
+    """
+
+    def __init__(self, data_dir: Path | None = None):
+        self.data_dir = data_dir
+
+
+class CLIServiceError(Exception):
+    """Base exception for CLI service errors."""
+
+    pass
+
+
+class DatabaseNotInitializedError(CLIServiceError):
+    """Raised when database is not initialized."""
+
+    pass
+
+
+class ServiceInitError(CLIServiceError):
+    """Raised when service initialization fails."""
+
+    pass
+
+
+class CLIServiceContext:
+    """Invocation-scoped context for CLI services.
+
+    Encapsulates:
+    - Data directory resolution from Typer context
+    - Config loading and validation
+    - Service factory creation
+    """
+
+    def __init__(self, ctx: typer.Context):
+        """Initialize CLI service context from Typer context.
+
+        Args:
+            ctx: Typer context with CLIContext in obj
+        """
+        self._ctx = ctx
+        self._config: TownElderConfig | None = None
+        self._service_factory: ServiceFactory | None = None
+
+    @property
+    def data_dir(self) -> Path | None:
+        """Get data directory from CLI context."""
+        if self._ctx.obj is not None and isinstance(self._ctx.obj, CLIContext):
+            return self._ctx.obj.data_dir
+        return None
+
+    def get_config(self) -> TownElderConfig:
+        """Load and return config, validating database is initialized.
+
+        Raises:
+            DatabaseNotInitializedError: If database not initialized
+            ConfigError: If config cannot be loaded
+        """
+        if self._config is None:
+            self._config = get_config(data_dir=self.data_dir)
+
+        # Validate database is initialized
+        if not self._config.data_dir.exists():
+            raise DatabaseNotInitializedError(
+                f"Database not initialized at {self._config.data_dir}"
+            )
+
+        return self._config
+
+    def get_service_factory(self) -> ServiceFactory:
+        """Get or create service factory.
+
+        Raises:
+            DatabaseNotInitializedError: If database not initialized
+            ServiceInitError: If services cannot be created
+        """
+        if self._service_factory is None:
+            # Ensure config is loaded first (validates DB exists)
+            self.get_config()
+            try:
+                self._service_factory = get_service_factory(data_dir=self.data_dir)
+            except Exception as e:
+                raise ServiceInitError(str(e)) from e
+
+        return self._service_factory
+
+    def create_embedder(self) -> Embedder:
+        """Create an embedder service."""
+        return self.get_service_factory().create_embedder()
+
+    def create_vector_store(self) -> ZvecStore:
+        """Create a vector store service."""
+        return self.get_service_factory().create_vector_store()
+
+    def create_git_runner(self, repo_path: Path | str | None = None) -> GitRunner:
+        """Create a git runner service."""
+        return self.get_service_factory().create_git_runner(repo_path)
+
+    def create_diff_parser(self) -> DiffParser:
+        """Create a diff parser service."""
+        return self.get_service_factory().create_diff_parser()
+
+
+@contextmanager
+def get_cli_services(
+    ctx: typer.Context,
+) -> Generator[tuple[CLIServiceContext, Embedder, ZvecStore], None, None]:
+    """Context manager for CLI services with automatic cleanup.
+
+    Provides validated config, embedder, and vector store with
+    automatic cleanup on exit.
+
+    Usage:
+        with get_cli_services(ctx) as (svc, embedder, store):
+            # use services
+            results = store.search(vector, top_k=5)
+
+    Args:
+        ctx: Typer context
+
+    Yields:
+        Tuple of (CLIServiceContext, Embedder, ZvecStore)
+
+    Raises:
+        typer.Exit: If services cannot be initialized
+    """
+    svc = CLIServiceContext(ctx)
+
+    # Validate config/DB first
+    try:
+        svc.get_config()
+    except DatabaseNotInitializedError:
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
+    except ConfigError as e:
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print(f"[dim]{e}[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    # Create services
+    try:
+        embedder = svc.create_embedder()
+        store = svc.create_vector_store()
+    except ServiceInitError as e:
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+    except Exception as e:
+        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    try:
+        yield svc, embedder, store
+    finally:
+        store.close()
+
+
+def require_initialized(ctx: typer.Context) -> TownElderConfig:
+    """Validate that database is initialized, returning config.
+
+    Raises typer.Exit if not initialized.
+
+    Args:
+        ctx: Typer context
+
+    Returns:
+        Validated TownElderConfig
+
+    Raises:
+        typer.Exit: If database not initialized
+    """
+    svc = CLIServiceContext(ctx)
+    try:
+        return svc.get_config()
+    except DatabaseNotInitializedError:
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)
+    except ConfigError as e:
+        error_console.print("[red]Error: Database not initialized[/red]")
+        console.print(f"[dim]{e}[/dim]")
+        raise typer.Exit(code=EXIT_ERROR)

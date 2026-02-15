@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.progress import (
     BarColumn,
     Progress,
@@ -16,13 +15,19 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from town_elder.config import get_config
-from town_elder.services import get_service_factory
-
-# Exit codes
-EXIT_SUCCESS = 0
-EXIT_ERROR = 1
-EXIT_INVALID_ARG = 2
+from town_elder.cli_services import (
+    EXIT_ERROR,
+    EXIT_INVALID_ARG,
+    EXIT_SUCCESS,
+    CLIContext,
+    CLIServiceContext,
+    _escape_rich,
+    console,
+    error_console,
+    get_cli_services,
+    require_initialized,
+)
+from town_elder.config import get_config as get_config
 
 app = typer.Typer(
     name="te",
@@ -30,8 +35,6 @@ app = typer.Typer(
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
-console = Console(stderr=False)  # stdout for normal output
-error_console = Console(stderr=True)  # stderr for errors
 
 # Global data directory option - DEPRECATED, use CLIContext instead
 _data_dir: Path | None = None
@@ -196,16 +199,6 @@ def _save_index_state(state_file: Path, repo_path: Path, frontier_commit_hash: s
     state_file.write_text(json.dumps(state))
 
 
-class CLIContext:
-    """Invocation-scoped context for CLI state.
-
-    Replaces module-global _data_dir to prevent leakage across CLI invocations.
-    """
-
-    def __init__(self, data_dir: Path | None = None):
-        self.data_dir = data_dir
-
-
 def _is_safe_te_storage_path(data_dir: Path, init_path: Path) -> bool:
     """Validate that data_dir is a safe te-managed storage location.
 
@@ -237,52 +230,22 @@ def _is_safe_te_storage_path(data_dir: Path, init_path: Path) -> bool:
     )
 
 
-def _escape_rich(text: str) -> str:
-    """Escape brackets to prevent Rich markup interpretation."""
-    return text.replace("[", "\\[").replace("]", "\\]")
-
-
 def _run_search(
     ctx: typer.Context,
     query: str,
     top_k: int,
 ) -> None:
     """Shared implementation for search-style commands."""
-    from town_elder.exceptions import ConfigError
+    with get_cli_services(ctx) as (svc, embedder, store):
+        try:
+            # Embed the query
+            query_vector = embedder.embed_single(query)
 
-    data_dir = _get_data_dir_from_context(ctx)
-    try:
-        config = get_config(data_dir=data_dir)
-    except ConfigError as e:
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print(f"[dim]{e}[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    # Validate that database is initialized
-    if not config.data_dir.exists():
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        services = get_service_factory(data_dir=data_dir)
-        embedder = services.create_embedder()
-        store = services.create_vector_store()
-    except Exception as e:
-        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        # Embed the query
-        query_vector = embedder.embed_single(query)
-
-        # Search
-        results = store.search(query_vector, top_k=top_k)
-    except Exception as e:
-        console.print(f"[red]Error during search:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-    finally:
-        store.close()
+            # Search
+            results = store.search(query_vector, top_k=top_k)
+        except Exception as e:
+            console.print(f"[red]Error during search:[/red] {_escape_rich(str(e))}")
+            raise typer.Exit(code=EXIT_ERROR)
 
     if not results:
         console.print("[yellow]No results found[/yellow]")
@@ -298,36 +261,15 @@ def _run_search(
 
 def _run_stats(ctx: typer.Context) -> None:
     """Shared implementation for stats-style commands."""
-    from town_elder.exceptions import ConfigError
+    # Get config for display info
+    config = require_initialized(ctx)
 
-    data_dir = _get_data_dir_from_context(ctx)
-    try:
-        config = get_config(data_dir=data_dir)
-    except ConfigError as e:
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print(f"[dim]{e}[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    # Validate that database is initialized
-    if not config.data_dir.exists():
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        services = get_service_factory(data_dir=data_dir)
-        store = services.create_vector_store()
-    except Exception as e:
-        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        count = store.count()
-    except Exception as e:
-        console.print(f"[red]Error getting stats:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-    finally:
-        store.close()
+    with get_cli_services(ctx) as (svc, embedder, store):
+        try:
+            count = store.count()
+        except Exception as e:
+            console.print(f"[red]Error getting stats:[/red] {_escape_rich(str(e))}")
+            raise typer.Exit(code=EXIT_ERROR)
 
     console.print("[bold]Town Elder Statistics[/bold]")
     console.print(f"  Documents: {count}")
@@ -539,15 +481,6 @@ def add(
     """
     import uuid
 
-    data_dir = _get_data_dir_from_context(ctx)
-    config = get_config(data_dir=data_dir)
-
-    # Validate that database is initialized
-    if not config.data_dir.exists():
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
     # Parse metadata with better error message
     meta = {}
     if metadata:
@@ -563,26 +496,17 @@ def add(
             error_console.print(f"[red]Error: Metadata must be a JSON object (dict), not {type(meta).__name__}[/red]")
             raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    try:
-        services = get_service_factory(data_dir=data_dir)
-        embedder = services.create_embedder()
-        store = services.create_vector_store()
-    except Exception as e:
-        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
+    with get_cli_services(ctx) as (svc, embedder, store):
+        try:
+            # Embed the text
+            doc_id = meta.get("id", str(uuid.uuid4()))
+            vector = embedder.embed_single(text)
 
-    try:
-        # Embed the text
-        doc_id = meta.get("id", str(uuid.uuid4()))
-        vector = embedder.embed_single(text)
-
-        # Store
-        store.insert(doc_id, vector, text, meta)
-    except Exception as e:
-        console.print(f"[red]Error storing document:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-    finally:
-        store.close()
+            # Store
+            store.insert(doc_id, vector, text, meta)
+        except Exception as e:
+            console.print(f"[red]Error storing document:[/red] {_escape_rich(str(e))}")
+            raise typer.Exit(code=EXIT_ERROR)
 
     console.print(f"[green]Added document: {doc_id}[/green]")
 
@@ -621,15 +545,7 @@ def index(  # noqa: PLR0912
     Recursively indexes all .py and .md files in the specified directory.
     Excludes .git, .venv, __pycache__, node_modules, and other common ignore patterns.
     """
-    data_dir = _get_data_dir_from_context(ctx)
-    config = get_config(data_dir=data_dir)
-
-    # Validate that database is initialized
-    if not config.data_dir.exists():
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
+    # Validate path first (before services)
     index_path = Path(path).resolve()
     if not index_path.exists():
         error_console.print(f"[red]Error: Path does not exist: {path}[/red]")
@@ -639,74 +555,65 @@ def index(  # noqa: PLR0912
         error_console.print(f"[red]Error: Path is not a directory: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    try:
-        services = get_service_factory(data_dir=data_dir)
-        embedder = services.create_embedder()
-        store = services.create_vector_store()
-    except Exception as e:
-        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
+    with get_cli_services(ctx) as (svc, embedder, store):
+        # Default exclusion patterns
+        default_excludes = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", "venv", ".env", ".eggs", "*.egg-info", ".hg", ".svn", ".bzr", "vendor"}
+        if exclude:
+            default_excludes.update(exclude)
 
-    # Default exclusion patterns
-    default_excludes = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", "venv", ".env", ".eggs", "*.egg-info", ".hg", ".svn", ".bzr", "vendor"}
-    if exclude:
-        default_excludes.update(exclude)
+        def should_exclude(path: Path) -> bool:
+            """Check if path matches any exclusion pattern."""
+            parts = path.parts
+            for pattern in default_excludes:
+                if pattern.startswith("*"):
+                    # Handle glob patterns like *.egg-info
+                    if any(part.endswith(pattern[1:]) for part in parts):
+                        return True
+                else:
+                    # Handle directory name patterns
+                    if pattern in parts:
+                        return True
+            return False
 
-    def should_exclude(path: Path) -> bool:
-        """Check if path matches any exclusion pattern."""
-        parts = path.parts
-        for pattern in default_excludes:
-            if pattern.startswith("*"):
-                # Handle glob patterns like *.egg-info
-                if any(part.endswith(pattern[1:]) for part in parts):
-                    return True
-            else:
-                # Handle directory name patterns
-                if pattern in parts:
-                    return True
-        return False
+        # Find all text files with exclusion filtering
+        all_files = list(index_path.rglob("*.py")) + list(index_path.rglob("*.md"))
+        excluded_files = [f for f in all_files if should_exclude(f)]
+        files_to_index = [f for f in all_files if not should_exclude(f)]
 
-    # Find all text files with exclusion filtering
-    all_files = list(index_path.rglob("*.py")) + list(index_path.rglob("*.md"))
-    excluded_files = [f for f in all_files if should_exclude(f)]
-    files_to_index = [f for f in all_files if not should_exclude(f)]
+        console.print(f"[green]Indexing {len(files_to_index)} files (attempted {len(all_files)}, excluded {len(excluded_files)})...[/green]")
 
-    console.print(f"[green]Indexing {len(files_to_index)} files (attempted {len(all_files)}, excluded {len(excluded_files)})...[/green]")
-
-    indexed_count = 0
-    skipped_count = 0
-    try:
-        for file in files_to_index:
-            try:
-                # Skip binary or unreadable files
-                if not file.is_file():
+        indexed_count = 0
+        skipped_count = 0
+        try:
+            for file in files_to_index:
+                try:
+                    # Skip binary or unreadable files
+                    if not file.is_file():
+                        skipped_count += 1
+                        continue
+                    text = file.read_text()
+                    # Use stable ID based on file path hash for idempotent indexing
+                    # zvec requires alphanumeric doc_ids, so we hash the path
+                    file_path_str = str(file)
+                    doc_id = hashlib.sha256(file_path_str.encode()).hexdigest()[:16]
+                    vector = embedder.embed_single(text)
+                    store.upsert(
+                        doc_id, vector, text,
+                        {"source": str(file), "type": file.suffix}
+                    )
+                    indexed_count += 1
+                except UnicodeDecodeError:
                     skipped_count += 1
-                    continue
-                text = file.read_text()
-                # Use stable ID based on file path hash for idempotent indexing
-                # zvec requires alphanumeric doc_ids, so we hash the path
-                file_path_str = str(file)
-                doc_id = hashlib.sha256(file_path_str.encode()).hexdigest()[:16]
-                vector = embedder.embed_single(text)
-                store.upsert(
-                    doc_id, vector, text,
-                    {"source": str(file), "type": file.suffix}
-                )
-                indexed_count += 1
-            except UnicodeDecodeError:
-                skipped_count += 1
-                error_console.print(f"[yellow]Skipped binary file: {file}[/yellow]")
-            except PermissionError:
-                skipped_count += 1
-                error_console.print(f"[yellow]Skipped unreadable file: {file}[/yellow]")
-            except Exception as e:
-                skipped_count += 1
-                error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
-    except Exception as e:
-        console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-    finally:
-        store.close()
+                    error_console.print(f"[yellow]Skipped binary file: {file}[/yellow]")
+                except PermissionError:
+                    skipped_count += 1
+                    error_console.print(f"[yellow]Skipped unreadable file: {file}[/yellow]")
+                except Exception as e:
+                    skipped_count += 1
+                    error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
+        except Exception as e:
+            console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
+            raise typer.Exit(code=EXIT_ERROR)
 
     if skipped_count > 0:
         console.print(f"[green]Indexed {indexed_count} files, skipped {skipped_count} (excluded {len(excluded_files)})[/green]")
@@ -761,15 +668,10 @@ def commit_index(  # noqa: PLR0912, PLR0913
 
     Parses commit messages and diffs to create searchable commit history.
     """
-    data_dir = _get_data_dir_from_context(ctx)
-    config = get_config(data_dir=data_dir)
+    # Validate database is initialized first
+    config = require_initialized(ctx)
 
-    # Validate that database is initialized
-    if not config.data_dir.exists():
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
+    # Validate repo path second
     repo_path = Path(path).resolve()
 
     if not (repo_path / ".git").exists():
@@ -787,21 +689,19 @@ def commit_index(  # noqa: PLR0912, PLR0913
         error_console.print("[red]Error: --max-diff-size must be greater than 0[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    # Load last indexed commit from state file (repo-scoped)
     state_file = config.data_dir / "index_state.json"
+
+    # Load last indexed commit from state file (repo-scoped)
     last_indexed = None
     if incremental and not force:
         last_indexed, _ = _load_index_state(state_file, repo_path)
 
-    try:
-        services = get_service_factory(data_dir=data_dir)
-        git = services.create_git_runner(repo_path)
-        embedder = services.create_embedder()
-        store = services.create_vector_store()
-        diff_parser = services.create_diff_parser()
-    except Exception as e:
-        console.print(f"[red]Error initializing services:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
+    # Get services
+    svc = CLIServiceContext(ctx)
+    git = svc.create_git_runner(repo_path)
+    embedder = svc.create_embedder()
+    store = svc.create_vector_store()
+    diff_parser = svc.create_diff_parser()
 
     try:
         initial_limit = batch_size if all_history else limit
@@ -1125,22 +1025,6 @@ def export(  # noqa: PLR0912
 
     Exports all documents from the vector store to JSON or JSONL format.
     """
-    from town_elder.exceptions import ConfigError
-
-    data_dir = _get_data_dir_from_context(ctx)
-    try:
-        config = get_config(data_dir=data_dir)
-    except ConfigError as e:
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print(f"[dim]{e}[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    # Validate that database is initialized
-    if not config.data_dir.exists():
-        error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
-        raise typer.Exit(code=EXIT_ERROR)
-
     # Determine format from file extension if not explicitly specified
     if output == "-" and not format:
         # Default to json when outputting to stdout
@@ -1153,20 +1037,12 @@ def export(  # noqa: PLR0912
         error_console.print(f"[red]Error: Invalid format '{format}'. Use 'json' or 'jsonl'.[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    try:
-        services = get_service_factory(data_dir=data_dir)
-        store = services.create_vector_store()
-    except Exception as e:
-        console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-
-    try:
-        documents = store.get_all(include_vectors=include_vectors)
-    except Exception as e:
-        console.print(f"[red]Error exporting data:[/red] {_escape_rich(str(e))}")
-        raise typer.Exit(code=EXIT_ERROR)
-    finally:
-        store.close()
+    with get_cli_services(ctx) as (svc, embedder, store):
+        try:
+            documents = store.get_all(include_vectors=include_vectors)
+        except Exception as e:
+            console.print(f"[red]Error exporting data:[/red] {_escape_rich(str(e))}")
+            raise typer.Exit(code=EXIT_ERROR)
 
     # Serialize to chosen format
     if format == "jsonl":
