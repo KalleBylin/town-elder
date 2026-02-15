@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import typer
@@ -20,6 +21,7 @@ app = typer.Typer(
     name="te",
     help="Local-first semantic memory CLI for AI coding agents",
     add_completion=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 console = Console(stderr=False)  # stdout for normal output
 error_console = Console(stderr=True)  # stderr for errors
@@ -34,24 +36,37 @@ def _is_te_hook(content: str) -> bool:
     Uses robust detection that handles:
     - Extra arguments like --data-dir between te and commit-index
     - python -m town_elder invocation
+    - uv run te invocation
+    - Absolute interpreter paths (e.g., /usr/bin/python or sys.executable)
     - te command invocation
     """
     import re
 
     # Match patterns for te/town_elder hooks:
     # - te commit-index
+    # - uv run te commit-index
     # - python -m town_elder commit-index
+    # - /absolute/path/python -m town_elder commit-index
     # - te --data-dir /path commit-index
+    # - uv run te --data-dir /path commit-index
     # - python -m town_elder --data-dir /path commit-index
     patterns = [
         # te commit-index (no extra args)
         r'\bte\s+commit-index\b',
         # te [args...] commit-index (with extra args)
         r'\bte\s+\S+.*\s+commit-index\b',
+        # uv run te commit-index (no extra args)
+        r'\buv\s+run\s+te\s+commit-index\b',
+        # uv run te [args...] commit-index (with extra args)
+        r'\buv\s+run\s+te\s+\S+.*\s+commit-index\b',
         # python -m town_elder commit-index (no extra args)
         r'\bpython\s+-m\s+town_elder\s+commit-index\b',
         # python -m town_elder [args...] commit-index (with extra args)
         r'\bpython\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
+        # /absolute/path/python -m town_elder commit-index (no extra args)
+        r'/[^\\s]+/python\s+-m\s+town_elder\s+commit-index\b',
+        # /absolute/path/python -m town_elder [args...] commit-index (with extra args)
+        r'/[^\\s]+/python\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
     ]
 
     return any(re.search(pattern, content) for pattern in patterns)
@@ -81,6 +96,97 @@ def _get_data_dir_from_context(ctx: typer.Context) -> Path | None:
 
     # Fall back to deprecated global
     return _data_dir
+
+
+def _get_repo_id(repo_path: Path) -> str:
+    """Generate a deterministic ID for a repository based on its canonical path.
+
+    Uses SHA256 hash of the resolved absolute path to create a consistent
+    identifier that can be used for repo-scoped state storage.
+    """
+    canonical = str(repo_path.resolve())
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def _load_index_state(state_file: Path, repo_path: Path) -> tuple[str | None, dict]:
+    """Load incremental index state, scoped by repository.
+
+    Handles migration from legacy global format to repo-scoped format.
+
+    Returns:
+        Tuple of (last_indexed_commit, raw_state_dict).
+    """
+    last_indexed = None
+
+    if not state_file.exists():
+        return last_indexed, {"repos": {}}
+
+    try:
+        state = json.loads(state_file.read_text())
+    except Exception:
+        # Ignore invalid state file, treat as empty
+        return last_indexed, {"repos": {}}
+
+    # Check for legacy format (global last_indexed_commit key)
+    if "last_indexed_commit" in state and "repos" not in state:
+        # Migration: convert legacy format to repo-scoped
+        repo_id = _get_repo_id(repo_path)
+        legacy_commit = state["last_indexed_commit"]
+        migrated_state = {
+            "repos": {
+                repo_id: {
+                    "last_indexed_commit": legacy_commit,
+                    "repo_path": str(repo_path.resolve()),
+                    "updated_at": state.get("updated_at", ""),
+                }
+            }
+        }
+        # Save migrated state to file so subsequent reads work correctly
+        state_file.write_text(json.dumps(migrated_state))
+        return legacy_commit, migrated_state
+
+    # New repo-scoped format
+    if "repos" not in state:
+        state = {"repos": {}}
+
+    repo_id = _get_repo_id(repo_path)
+    repo_state = state["repos"].get(repo_id, {})
+    last_indexed = repo_state.get("last_indexed_commit")
+
+    return last_indexed, state
+
+
+def _save_index_state(state_file: Path, repo_path: Path, frontier_commit_hash: str) -> None:
+    """Save incremental index state, scoped by repository.
+
+    Creates or updates the repo-scoped entry in the state file.
+    """
+    # Load existing state (to preserve other repos' state)
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text())
+        except Exception:
+            state = {"repos": {}}
+    else:
+        state = {"repos": {}}
+
+    if "repos" not in state:
+        state = {"repos": {}}
+
+    # Ensure we have a valid dict (could be empty string from migration)
+    if not isinstance(state["repos"], dict):
+        state["repos"] = {}
+
+    repo_id = _get_repo_id(repo_path)
+    from datetime import datetime, timezone
+
+    state["repos"][repo_id] = {
+        "last_indexed_commit": frontier_commit_hash,
+        "repo_path": str(repo_path.resolve()),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    state_file.write_text(json.dumps(state))
 
 
 class CLIContext:
@@ -247,7 +353,7 @@ def main(
         raise typer.Exit(code=EXIT_SUCCESS)
 
 
-@app.command()
+@app.command(context_settings={"help_option_names": ["-h", "--help"]})
 def init(  # noqa: PLR0912
     ctx: typer.Context,
     path: str = typer.Option(
@@ -265,7 +371,6 @@ def init(  # noqa: PLR0912
     install_hook: bool = typer.Option(
         False,
         "--install-hook",
-        "-h",
         help="Also install post-commit hook for automatic indexing",
     ),
 ) -> None:
@@ -351,11 +456,12 @@ def init(  # noqa: PLR0912
                 if hook_path.exists():
                     console.print("[yellow]Warning: Hook already exists, skipping. Use 'te hook install --force' to overwrite[/yellow]")
                 else:
-                    # Use python -m town_elder for robustness across uv/pyenv environments
+                    # Use uv run for robustness across uv/pyenv environments
+                    # where bare 'python' may not be available on PATH
                     # Properly quote path to handle spaces
                     hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-python -m town_elder --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
+uv run te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
 """
                     hook_path.write_text(hook_content)
                     os.chmod(hook_path, 0o755)
@@ -648,16 +754,11 @@ def commit_index(  # noqa: PLR0912
         console.print("[dim]Ensure the path contains a .git directory[/dim]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    # Load last indexed commit from state file
+    # Load last indexed commit from state file (repo-scoped)
     state_file = config.data_dir / "index_state.json"
     last_indexed = None
-    if state_file.exists() and incremental and not force:
-        import json
-        try:
-            state = json.loads(state_file.read_text())
-            last_indexed = state.get("last_indexed_commit")
-        except Exception:
-            pass  # Ignore invalid state file
+    if incremental and not force:
+        last_indexed, _ = _load_index_state(state_file, repo_path)
 
     try:
         services = get_service_factory(data_dir=data_dir)
@@ -777,9 +878,7 @@ def commit_index(  # noqa: PLR0912
     # Save last indexed commit state only if sentinel was found.
     # This prevents unsafe state advance when sentinel is missing/stale.
     if frontier_commit_hash and sentinel_found:
-        import json
-        state = {"last_indexed_commit": frontier_commit_hash}
-        state_file.write_text(json.dumps(state))
+        _save_index_state(state_file, repo_path, frontier_commit_hash)
 
     if skipped_count > 0:
         console.print(f"[green]Indexed {indexed_count} commits, skipped {skipped_count}[/green]")
@@ -838,18 +937,19 @@ def install(
         raise typer.Exit(code=EXIT_ERROR)
 
     # Determine the data_dir to use in the hook - use absolute path for reliability
-    # Use python -m town_elder for robustness across uv/pyenv environments
+    # Use uv run for robustness across uv/pyenv environments
+    # where bare 'python' may not be available on PATH
     # Properly quote paths to handle spaces
     if data_dir:
         data_dir_arg = f'--data-dir "{config.data_dir}"'
         hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-python -m town_elder {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
+uv run te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
 """
     else:
-        hook_content = """#!/bin/sh
+        hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
+uv run te commit-index --repo "$(git rev-parse --show-toplevel)"
 """
 
     hook_path.write_text(hook_content)

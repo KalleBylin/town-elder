@@ -607,6 +607,32 @@ class TestInitErrorHandling:
         assert result.returncode == 0
         assert "Reinitialized" in result.stdout
 
+    def test_init_help_flag_does_not_initialize(self, temp_git_repo: Path):
+        """te init -h should show help and NOT initialize storage."""
+        data_dir = temp_git_repo / ".town_elder_test_help"
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "-h"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Usage:" in result.stdout or "usage:" in result.stdout.lower()
+        # Ensure no .town_elder directory was created
+        assert not data_dir.exists()
+
+    def test_init_install_hook_flag_works(self, temp_git_repo: Path):
+        """te init --install-hook should install hook when requested."""
+        data_dir = temp_git_repo / ".town_elder_hook"
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--install-hook", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert data_dir.exists()
+
 
 class TestIndexErrorHandling:
     """Tests for index command error handling."""
