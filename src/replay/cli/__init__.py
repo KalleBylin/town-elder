@@ -24,7 +24,7 @@ app = typer.Typer(
 console = Console(stderr=False)  # stdout for normal output
 error_console = Console(stderr=True)  # stderr for errors
 
-# Global data directory option
+# Global data directory option - DEPRECATED, use CLIContext instead
 _data_dir: Path | None = None
 
 
@@ -59,9 +59,40 @@ def _is_replay_hook(content: str) -> bool:
 
 
 def set_data_dir(path: Path | str | None) -> None:
-    """Set the global data directory."""
+    """Set the global data directory.
+
+    DEPRECATED: This sets module-global state which leaks across invocations.
+    Use CLIContext for invocation-scoped data directory instead.
+    Kept for backward compatibility with existing tests.
+    """
     global _data_dir
     _data_dir = Path(path).expanduser() if path else None
+
+
+def _get_data_dir_from_context(ctx: typer.Context) -> Path | None:
+    """Get data directory from Typer context, falling back to deprecated global.
+
+    This function implements invocation-scoped data directory resolution:
+    1. First checks ctx.obj (new context-based approach)
+    2. Falls back to deprecated _data_dir global for backward compatibility
+    3. Returns None if neither is set (will use default resolution)
+    """
+    # Check new context-based approach first
+    if ctx.obj is not None and hasattr(ctx.obj, "data_dir"):
+        return ctx.obj.data_dir
+
+    # Fall back to deprecated global (for backward compat)
+    return _data_dir
+
+
+class CLIContext:
+    """Invocation-scoped context for CLI state.
+
+    Replaces module-global _data_dir to prevent leakage across CLI invocations.
+    """
+
+    def __init__(self, data_dir: Path | None = None):
+        self.data_dir = data_dir
 
 
 def _escape_rich(text: str) -> str:
@@ -70,6 +101,7 @@ def _escape_rich(text: str) -> str:
 
 
 def _run_search(
+    ctx: typer.Context,
     query: str,
     top_k: int,
     author: str | None,
@@ -77,7 +109,8 @@ def _run_search(
     since: str | None,
 ) -> None:
     """Shared implementation for search-style commands."""
-    config = get_config(data_dir=_data_dir)
+    data_dir = _get_data_dir_from_context(ctx)
+    config = get_config(data_dir=data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
@@ -86,7 +119,7 @@ def _run_search(
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
-        services = get_service_factory(data_dir=_data_dir)
+        services = get_service_factory(data_dir=data_dir)
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
@@ -117,9 +150,10 @@ def _run_search(
         console.print(f"   {text_snippet}...")
 
 
-def _run_stats() -> None:
+def _run_stats(ctx: typer.Context) -> None:
     """Shared implementation for stats-style commands."""
-    config = get_config(data_dir=_data_dir)
+    data_dir = _get_data_dir_from_context(ctx)
+    config = get_config(data_dir=data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
@@ -128,7 +162,7 @@ def _run_stats() -> None:
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
-        services = get_service_factory(data_dir=_data_dir)
+        services = get_service_factory(data_dir=data_dir)
         store = services.create_vector_store()
     except Exception as e:
         console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
@@ -164,8 +198,8 @@ def main(
 
     A local-first semantic memory CLI for AI coding agents.
     """
-    if data_dir:
-        set_data_dir(data_dir)
+    # Use invocation-scoped context instead of global to prevent data-dir leakage
+    ctx.obj = CLIContext(data_dir=Path(data_dir).expanduser() if data_dir else None)
 
     if ctx.invoked_subcommand is None:
         console.print("[bold]replay[/bold] - Semantic memory CLI")
@@ -175,6 +209,7 @@ def main(
 
 @app.command()
 def init(
+    ctx: typer.Context,
     path: str = typer.Option(
         ".",
         "--path",
@@ -212,7 +247,7 @@ def init(
         error_console.print(f"[red]Error: Path is not a directory: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    data_dir = _data_dir or (init_path / ".replay")
+    data_dir = _get_data_dir_from_context(ctx) or (init_path / ".replay")
 
     # Track whether this is a reinitialization
     is_reinit = data_dir.exists()
@@ -283,6 +318,7 @@ python -m replay --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --
 
 @app.command()
 def search(
+    ctx: typer.Context,
     query: str = typer.Argument(..., help="Search query text"),
     top_k: int = typer.Option(
         5,
@@ -310,11 +346,12 @@ def search(
 
     Embeds the query text and finds the most similar documents.
     """
-    _run_search(query=query, top_k=top_k, author=author, path=path, since=since)
+    _run_search(ctx, query=query, top_k=top_k, author=author, path=path, since=since)
 
 
 @app.command("query")
 def query(
+    ctx: typer.Context,
     query: str = typer.Argument(..., help="Search query text"),
     top_k: int = typer.Option(
         5,
@@ -342,11 +379,12 @@ def query(
 
     Alias for 'search' command. Embeds the query text and finds the most similar documents.
     """
-    _run_search(query=query, top_k=top_k, author=author, path=path, since=since)
+    _run_search(ctx, query=query, top_k=top_k, author=author, path=path, since=since)
 
 
 @app.command()
 def add(
+    ctx: typer.Context,
     text: str = typer.Option(
         ...,
         "--text",
@@ -366,7 +404,8 @@ def add(
     """
     import uuid
 
-    config = get_config(data_dir=_data_dir)
+    data_dir = _get_data_dir_from_context(ctx)
+    config = get_config(data_dir=data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
@@ -390,7 +429,7 @@ def add(
             raise typer.Exit(code=EXIT_INVALID_ARG)
 
     try:
-        services = get_service_factory(data_dir=_data_dir)
+        services = get_service_factory(data_dir=data_dir)
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
@@ -414,25 +453,26 @@ def add(
 
 
 @app.command()
-def stats() -> None:
+def stats(ctx: typer.Context) -> None:
     """Show indexing statistics and storage info.
 
     Displays the number of documents and configuration details.
     """
-    _run_stats()
+    _run_stats(ctx)
 
 
 @app.command("status")
-def status() -> None:
+def status(ctx: typer.Context) -> None:
     """Show indexing statistics and storage info.
 
     Alias for 'stats' command. Displays the number of documents and configuration details.
     """
-    _run_stats()
+    _run_stats(ctx)
 
 
 @app.command()
 def index(
+    ctx: typer.Context,
     path: str = typer.Argument(".", help="Path to directory to index (default: current directory)"),
     exclude: list[str] = typer.Option(
         None,
@@ -446,7 +486,8 @@ def index(
     Recursively indexes all .py and .md files in the specified directory.
     Excludes .git, .venv, __pycache__, node_modules, and other common ignore patterns.
     """
-    config = get_config(data_dir=_data_dir)
+    data_dir = _get_data_dir_from_context(ctx)
+    config = get_config(data_dir=data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
@@ -464,7 +505,7 @@ def index(
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     try:
-        services = get_service_factory(data_dir=_data_dir)
+        services = get_service_factory(data_dir=data_dir)
         embedder = services.create_embedder()
         store = services.create_vector_store()
     except Exception as e:
@@ -540,6 +581,7 @@ def index(
 
 @app.command()
 def commit_index(
+    ctx: typer.Context,
     path: str = typer.Option(
         ".",
         "--repo",
@@ -568,7 +610,8 @@ def commit_index(
 
     Parses commit messages and diffs to create searchable commit history.
     """
-    config = get_config(data_dir=_data_dir)
+    data_dir = _get_data_dir_from_context(ctx)
+    config = get_config(data_dir=data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
@@ -595,7 +638,7 @@ def commit_index(
             pass  # Ignore invalid state file
 
     try:
-        services = get_service_factory(data_dir=_data_dir)
+        services = get_service_factory(data_dir=data_dir)
         git = services.create_git_runner(repo_path)
         embedder = services.create_embedder()
         store = services.create_vector_store()
@@ -728,6 +771,7 @@ hook_app = typer.Typer(name="hook", help="Manage git hooks for automatic indexin
 
 @hook_app.command()
 def install(
+    ctx: typer.Context,
     path: str = typer.Option(".", "--repo", "-r", help="Git repository path"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing hook"),
 ) -> None:
@@ -760,13 +804,14 @@ def install(
             error_console.print("[yellow]Warning: Existing hook is not a replay hook[/yellow]")
             console.print("Use --force to overwrite anyway")
 
-    # Get the data directory that was used (or would be used by default)
-    config = get_config(data_dir=_data_dir)
+    # Get the data directory from context (invocation-scoped)
+    data_dir = _get_data_dir_from_context(ctx)
+    config = get_config(data_dir=data_dir)
 
     # Determine the data_dir to use in the hook - use absolute path for reliability
     # Use python -m replay for robustness across uv/pyenv environments
     # Properly quote paths to handle spaces
-    if _data_dir:
+    if data_dir:
         data_dir_arg = f'--data-dir "{config.data_dir}"'
         hook_content = f"""#!/bin/sh
 # Replay post-commit hook - automatically indexes commits
@@ -850,6 +895,7 @@ app.add_typer(hook_app, name="hook")
 
 @app.command()
 def export(
+    ctx: typer.Context,
     output: str = typer.Option(
         "-",
         "--output",
@@ -872,7 +918,8 @@ def export(
 
     Exports all documents from the vector store to JSON or JSONL format.
     """
-    config = get_config(data_dir=_data_dir)
+    data_dir = _get_data_dir_from_context(ctx)
+    config = get_config(data_dir=data_dir)
 
     # Validate that database is initialized
     if not config.data_dir.exists():
@@ -893,7 +940,7 @@ def export(
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     try:
-        services = get_service_factory(data_dir=_data_dir)
+        services = get_service_factory(data_dir=data_dir)
         store = services.create_vector_store()
     except Exception as e:
         console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")

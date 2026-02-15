@@ -23,6 +23,7 @@ def test_query_alias_executes_via_shared_helper(monkeypatch):
     calls: list[tuple[str, int, str | None, str | None, str | None]] = []
 
     def fake_run_search(
+        ctx,
         query: str,
         top_k: int,
         author: str | None,
@@ -44,7 +45,7 @@ def test_status_alias_executes_via_shared_helper(monkeypatch):
     """`replay status` should dispatch through the shared stats helper."""
     calls = {"count": 0}
 
-    def fake_run_stats() -> None:
+    def fake_run_stats(ctx) -> None:
         calls["count"] += 1
 
     monkeypatch.setattr(cli, "_run_stats", fake_run_stats)
@@ -272,23 +273,21 @@ def test_hook_generation_quotes_data_dir(tmp_path):
     data_dir = tmp_path / "data dir"
     data_dir.mkdir()
 
-    # Set the data dir globally
-    cli.set_data_dir(data_dir)
+    # Pass data-dir via CLI option (invocation-scoped)
+    result = runner.invoke(
+        cli.app,
+        ["--data-dir", str(data_dir), "hook", "install", "--repo", str(repo_path)]
+    )
 
-    try:
-        result = runner.invoke(cli.app, ["hook", "install", "--repo", str(repo_path)])
+    assert result.exit_code == 0
 
-        assert result.exit_code == 0
+    hook_path = repo_path / ".git" / "hooks" / "post-commit"
+    assert hook_path.exists()
 
-        hook_path = repo_path / ".git" / "hooks" / "post-commit"
-        assert hook_path.exists()
-
-        hook_content = hook_path.read_text()
-        # Check that the path is quoted
-        assert '--data-dir "' in hook_content
-        assert str(data_dir) in hook_content
-    finally:
-        cli.set_data_dir(None)
+    hook_content = hook_path.read_text()
+    # Check that the path is quoted
+    assert '--data-dir "' in hook_content
+    assert str(data_dir) in hook_content
 
 
 def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monkeypatch, tmp_path):
@@ -452,3 +451,80 @@ class TestHookExecution:
             # In a full integration test, we'd verify the index state advanced
         finally:
             cli.set_data_dir(None)
+
+
+def test_data_dir_not_leaked_across_invocations(tmp_path):
+    """Data directory should be invocation-scoped, not leak across CLI calls.
+
+    Regression test for: replay-0d6.9
+    Previously, module-global _data_dir leaked across in-process CLI invocations.
+
+    This test verifies that explicit --data-dir is properly scoped per-invocation.
+    """
+    from pathlib import Path
+    from typer.testing import CliRunner
+
+    # Clear any stale global state before running this test
+    cli.set_data_dir(None)
+
+    isolated_runner = CliRunner()
+
+    # Use isolated filesystem to ensure clean state
+    with isolated_runner.isolated_filesystem():
+        # Create git repos for init
+        repo1 = Path("repo1")
+        repo2 = Path("repo2")
+        repo1.mkdir()
+        repo2.mkdir()
+        (repo1 / ".git").mkdir()
+        (repo2 / ".git").mkdir()
+
+        # Create data directories
+        data_dir_1 = Path("data1")
+        data_dir_2 = Path("data2")
+
+        # Test 1: Initialize with explicit --data-dir
+        result1 = isolated_runner.invoke(
+            cli.app,
+            ["--data-dir", str(data_dir_1), "init", "--path", str(repo1)],
+            catch_exceptions=False,
+        )
+        assert result1.exit_code == 0, f"Init failed: {result1.output}"
+
+        # Test 2: Initialize another db with different --data-dir
+        result2 = isolated_runner.invoke(
+            cli.app,
+            ["--data-dir", str(data_dir_2), "init", "--path", str(repo2)],
+            catch_exceptions=False,
+        )
+        assert result2.exit_code == 0, f"Init failed: {result2.output}"
+
+        # Test 3: Verify --data-dir is invocation-scoped - use data_dir_1
+        result3 = isolated_runner.invoke(
+            cli.app,
+            ["--data-dir", str(data_dir_1), "stats"],
+            catch_exceptions=False,
+        )
+        assert result3.exit_code == 0
+        assert data_dir_1.name in result3.output
+
+        # Test 4: Verify --data-dir is invocation-scoped - use data_dir_2
+        result4 = isolated_runner.invoke(
+            cli.app,
+            ["--data-dir", str(data_dir_2), "stats"],
+            catch_exceptions=False,
+        )
+        assert result4.exit_code == 0
+        assert data_dir_2.name in result4.output
+
+        # Test 5: Verify data_dir_1 is NOT leaked when calling with data_dir_2
+        # The output should show data_dir_2, not data_dir_1
+        result5 = isolated_runner.invoke(
+            cli.app,
+            ["--data-dir", str(data_dir_2), "stats"],
+            catch_exceptions=False,
+        )
+        assert result5.exit_code == 0
+        assert data_dir_2.name in result5.output
+        # And should NOT contain data_dir_1
+        assert data_dir_1.name not in result5.output
