@@ -1,4 +1,4 @@
-"""Pytest configuration and fixtures for replay tests."""
+"""Pytest configuration and fixtures for town_elder tests."""
 from __future__ import annotations
 
 import tempfile
@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from replay.config import ReplayConfig
-from replay.embeddings.embedder import Embedder
-from replay.git.diff_parser import DiffParser
-from replay.storage.vector_store import ZvecStore
+from town_elder.config import TownElderConfig
+from town_elder.embeddings.embedder import Embedder
+from town_elder.git.diff_parser import DiffParser
+from town_elder.storage.vector_store import ZvecStore
 
 
 @pytest.fixture
@@ -22,9 +22,9 @@ def temp_dir() -> Iterator[Path]:
 
 
 @pytest.fixture
-def mock_config(temp_dir: Path) -> ReplayConfig:
+def mock_config(temp_dir: Path) -> TownElderConfig:
     """Create a mock config for testing."""
-    return ReplayConfig(
+    return TownElderConfig(
         data_dir=temp_dir / "data",
         db_name="test.db",
         embed_model="BAAI/bge-small-en-v1.5",

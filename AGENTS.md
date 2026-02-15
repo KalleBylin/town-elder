@@ -23,7 +23,7 @@ This project uses **uv** for dependency management and **pyenv** for Python vers
 uv sync
 
 # Run the CLI
-uv run replay <command>
+uv run te <command>
 
 # Add dependencies
 uv add <package>

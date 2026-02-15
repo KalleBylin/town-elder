@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
-import replay.cli as cli
-from replay.git.runner import Commit
+import town_elder.cli as cli
+from town_elder.git.runner import Commit
 
 runner = CliRunner()
 
@@ -19,7 +19,7 @@ _TEST_COMMITS_RETRY_COUNT = 49
 
 
 def test_query_alias_executes_via_shared_helper(monkeypatch):
-    """`replay query` should dispatch through the shared search helper."""
+    """`te query` should dispatch through the shared search helper."""
     calls: list[tuple[str, int, str | None, str | None, str | None]] = []
 
     def fake_run_search(  # noqa: PLR0913
@@ -42,7 +42,7 @@ def test_query_alias_executes_via_shared_helper(monkeypatch):
 
 
 def test_status_alias_executes_via_shared_helper(monkeypatch):
-    """`replay status` should dispatch through the shared stats helper."""
+    """`te status` should dispatch through the shared stats helper."""
     calls = {"count": 0}
 
     def fake_run_stats(ctx) -> None:
@@ -175,82 +175,89 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
     assert "c2" in controller.indexed_hashes
 
 
-# Tests for hook generation and detection (tickets replay-0d6.4 and replay-0d6.5)
+# Tests for hook generation and detection
 
 
-def test_is_replay_hook_detects_bare_replay():
-    """Hook detection should recognize bare 'replay commit-index'."""
-    from replay.cli import _is_replay_hook
-
-    content = '''#!/bin/sh
-# Replay post-commit hook - automatically indexes commits
-replay commit-index --repo "$(git rev-parse --show-toplevel)"
-'''
-    assert _is_replay_hook(content) is True
-
-
-def test_is_replay_hook_detects_python_m_replay():
-    """Hook detection should recognize 'python -m replay commit-index'."""
-    from replay.cli import _is_replay_hook
+def test_is_te_hook_detects_te():
+    """Hook detection should recognize 'te commit-index'."""
+    from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
-# Replay post-commit hook - automatically indexes commits
-python -m replay commit-index --repo "$(git rev-parse --show-toplevel)"
+# Town Elder post-commit hook - automatically indexes commits
+te commit-index --repo "$(git rev-parse --show-toplevel)"
 '''
-    assert _is_replay_hook(content) is True
+    assert _is_te_hook(content) is True
 
 
-def test_is_replay_hook_detects_with_data_dir_arg():
+def test_is_te_hook_detects_python_m_town_elder():
+    """Hook detection should recognize 'python -m town_elder commit-index'."""
+    from town_elder.cli import _is_te_hook
+
+    content = '''#!/bin/sh
+# Town Elder post-commit hook - automatically indexes commits
+python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_te_hook(content) is True
+
+
+def test_is_te_hook_detects_with_data_dir_arg():
     """Hook detection should recognize hooks with --data-dir argument."""
-    from replay.cli import _is_replay_hook
+    from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
-# Replay post-commit hook - automatically indexes commits
-replay --data-dir /path/to/data commit-index --repo "$(git rev-parse --show-toplevel)"
+# Town Elder post-commit hook - automatically indexes commits
+te --data-dir /path/to/data commit-index --repo "$(git rev-parse --show-toplevel)"
 '''
-    assert _is_replay_hook(content) is True
+    assert _is_te_hook(content) is True
 
 
-def test_is_replay_hook_detects_python_m_with_data_dir():
-    """Hook detection should recognize 'python -m replay --data-dir' hooks."""
-    from replay.cli import _is_replay_hook
+def test_is_te_hook_detects_python_m_with_data_dir():
+    """Hook detection should recognize 'python -m town_elder --data-dir' hooks."""
+    from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
-# Replay post-commit hook - automatically indexes commits
-python -m replay --data-dir "/path/with spaces/data" commit-index --repo "$(git rev-parse --show-toplevel)"
+# Town Elder post-commit hook - automatically indexes commits
+python -m town_elder --data-dir "/path/with spaces/data" commit-index --repo "$(git rev-parse --show-toplevel)"
 '''
-    assert _is_replay_hook(content) is True
+    assert _is_te_hook(content) is True
 
 
-def test_is_replay_hook_rejects_non_replay_hooks():
-    """Hook detection should reject non-Replay hooks."""
-    from replay.cli import _is_replay_hook
+def test_is_te_hook_rejects_non_te_hooks():
+    """Hook detection should reject non-Town Elder hooks."""
+    from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
 # Some other hook
 other-tool commit-index --repo "$(git rev-parse --show-toplevel)"
 '''
-    assert _is_replay_hook(content) is False
+    assert _is_te_hook(content) is False
 
 
-def test_is_replay_hook_rejects_partial_matches():
-    """Hook detection should reject partial matches like 'preplay commit-index'."""
-    from replay.cli import _is_replay_hook
+def test_is_te_hook_rejects_partial_matches():
+    """Hook detection should reject partial matches like 'ate commit-index'."""
+    from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
-preplay commit-index --repo "$(git rev-parse --show-toplevel)"
+ate commit-index --repo "$(git rev-parse --show-toplevel)"
 '''
-    assert _is_replay_hook(content) is False
+    assert _is_te_hook(content) is False
 
 
-def test_hook_generation_uses_python_m_replay(tmp_path):
-    """Generated hooks should use 'python -m replay' for PATH independence."""
+def test_hook_generation_uses_python_m_town_elder(tmp_path):
+    """Generated hooks should use 'python -m town_elder' for PATH independence."""
     # Create a minimal git repo
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     (repo_path / ".git").mkdir()
 
-    result = runner.invoke(cli.app, ["hook", "install", "--repo", str(repo_path)])
+    # Create data directory
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    result = runner.invoke(
+        cli.app,
+        ["--data-dir", str(data_dir), "hook", "install", "--repo", str(repo_path)]
+    )
 
     assert result.exit_code == 0
 
@@ -258,8 +265,8 @@ def test_hook_generation_uses_python_m_replay(tmp_path):
     assert hook_path.exists()
 
     hook_content = hook_path.read_text()
-    assert "python -m replay" in hook_content
-    assert "replay commit-index" in hook_content
+    assert "python -m town_elder" in hook_content
+    assert "commit-index" in hook_content
 
 
 def test_hook_generation_quotes_data_dir(tmp_path):
@@ -383,7 +390,7 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
 
 
 class TestHookExecution:
-    """Tests for actually executing generated hooks (replay-0d6.12)."""
+    """Tests for actually executing generated hooks."""
 
     def test_generated_hook_executes_successfully(self, tmp_path, monkeypatch):
         """Generated hook should execute successfully when commit is made."""
@@ -410,9 +417,6 @@ class TestHookExecution:
         # Create a data dir (but don't create it - init will create it)
         data_dir = tmp_path / "data"
 
-        # Set up the CLI to use this data dir
-        cli.set_data_dir(data_dir)
-
         # Track whether commit-index was invoked
         commit_index_calls = {"count": 0}
 
@@ -425,12 +429,18 @@ class TestHookExecution:
         monkeypatch.setattr(cli, "commit_index", tracking_commit_index)
 
         try:
-            # Initialize replay
-            result = runner.invoke(cli.app, ["init", "--path", str(repo_path)])
+            # Initialize town_elder with explicit data-dir
+            result = runner.invoke(
+                cli.app,
+                ["--data-dir", str(data_dir), "init", "--path", str(repo_path)]
+            )
             assert result.exit_code == 0, f"Init failed: {result.output}"
 
-            # Install hook
-            result = runner.invoke(cli.app, ["hook", "install", "--repo", str(repo_path)])
+            # Install hook with explicit data-dir
+            result = runner.invoke(
+                cli.app,
+                ["--data-dir", str(data_dir), "hook", "install", "--repo", str(repo_path)]
+            )
             assert result.exit_code == 0, f"Hook install failed: {result.output}"
 
             hook_path = repo_path / ".git" / "hooks" / "post-commit"

@@ -1,11 +1,11 @@
-"""Core tests for replay."""
+"""Core tests for town_elder."""
 from __future__ import annotations
 
 import numpy as np
 
-from replay.embeddings.embedder import Embedder
-from replay.git.diff_parser import DiffFile, DiffParser
-from replay.storage.vector_store import ZvecStore
+from town_elder.embeddings.embedder import Embedder
+from town_elder.git.diff_parser import DiffFile, DiffParser
+from town_elder.storage.vector_store import ZvecStore
 
 # Test constants
 _DEFAULT_EMBED_DIMENSION = 384

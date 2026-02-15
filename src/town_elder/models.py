@@ -1,4 +1,4 @@
-"""Domain entities for replay."""
+"""Domain entities for town_elder."""
 from __future__ import annotations
 
 from datetime import datetime

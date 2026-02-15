@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from replay.config import get_config
-from replay.embeddings import Embedder
-from replay.git import DiffParser, GitRunner
-from replay.storage import ZvecStore
+from town_elder.config import get_config
+from town_elder.embeddings import Embedder
+from town_elder.git import DiffParser, GitRunner
+from town_elder.storage import ZvecStore
 
 
 class ServiceFactory:

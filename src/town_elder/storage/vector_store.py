@@ -67,7 +67,7 @@ class ZvecStore:
                     )
 
                     schema = zvec.CollectionSchema(
-                        name="replay",
+                        name="town_elder",
                         fields=[text_field, metadata_field],
                         vectors=emb_vector,
                     )

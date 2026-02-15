@@ -1,4 +1,4 @@
-"""CLI entry point for replay."""
+"""CLI entry point for Town Elder."""
 from __future__ import annotations
 
 import hashlib
@@ -8,8 +8,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from replay.config import get_config
-from replay.services import get_service_factory
+from town_elder.config import get_config
+from town_elder.services import get_service_factory
 
 # Exit codes
 EXIT_SUCCESS = 0
@@ -17,7 +17,7 @@ EXIT_ERROR = 1
 EXIT_INVALID_ARG = 2
 
 app = typer.Typer(
-    name="replay",
+    name="te",
     help="Local-first semantic memory CLI for AI coding agents",
     add_completion=False,
 )
@@ -28,31 +28,30 @@ error_console = Console(stderr=True)  # stderr for errors
 _data_dir: Path | None = None
 
 
-def _is_replay_hook(content: str) -> bool:
-    """Check if hook content is a Replay commit-index hook.
+def _is_te_hook(content: str) -> bool:
+    """Check if hook content is a Town Elder commit-index hook.
 
     Uses robust detection that handles:
-    - Extra arguments like --data-dir between replay and commit-index
-    - python -m replay invocation
-    - Bare replay invocation
+    - Extra arguments like --data-dir between te and commit-index
+    - python -m town_elder invocation
+    - te command invocation
     """
     import re
 
-    # Match patterns like:
-    # - replay commit-index
-    # - python -m replay commit-index
-    # - replay --data-dir /path commit-index
-    # - python -m replay --data-dir /path commit-index
-    # Uses word boundaries to avoid matching unrelated "replay" or "commit-index"
+    # Match patterns for te/town_elder hooks:
+    # - te commit-index
+    # - python -m town_elder commit-index
+    # - te --data-dir /path commit-index
+    # - python -m town_elder --data-dir /path commit-index
     patterns = [
-        # replay commit-index (no extra args)
-        r'\breplay\s+commit-index\b',
-        # replay [args...] commit-index (with extra args)
-        r'\breplay\s+\S+.*\s+commit-index\b',
-        # python -m replay commit-index (no extra args)
-        r'\bpython\s+-m\s+replay\s+commit-index\b',
-        # python -m replay [args...] commit-index (with extra args)
-        r'\bpython\s+-m\s+replay\s+\S+.*\s+commit-index\b',
+        # te commit-index (no extra args)
+        r'\bte\s+commit-index\b',
+        # te [args...] commit-index (with extra args)
+        r'\bte\s+\S+.*\s+commit-index\b',
+        # python -m town_elder commit-index (no extra args)
+        r'\bpython\s+-m\s+town_elder\s+commit-index\b',
+        # python -m town_elder [args...] commit-index (with extra args)
+        r'\bpython\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
     ]
 
     return any(re.search(pattern, content) for pattern in patterns)
@@ -63,7 +62,6 @@ def set_data_dir(path: Path | str | None) -> None:
 
     DEPRECATED: This sets module-global state which leaks across invocations.
     Use CLIContext for invocation-scoped data directory instead.
-    Kept for backward compatibility with existing tests.
     """
     global _data_dir
     _data_dir = Path(path).expanduser() if path else None
@@ -74,14 +72,14 @@ def _get_data_dir_from_context(ctx: typer.Context) -> Path | None:
 
     This function implements invocation-scoped data directory resolution:
     1. First checks ctx.obj (new context-based approach)
-    2. Falls back to deprecated _data_dir global for backward compatibility
+    2. Falls back to deprecated _data_dir global
     3. Returns None if neither is set (will use default resolution)
     """
     # Check new context-based approach first
     if ctx.obj is not None and hasattr(ctx.obj, "data_dir"):
         return ctx.obj.data_dir
 
-    # Fall back to deprecated global (for backward compat)
+    # Fall back to deprecated global
     return _data_dir
 
 
@@ -115,7 +113,7 @@ def _run_search(  # noqa: PLR0913
     # Validate that database is initialized
     if not config.data_dir.exists():
         error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
@@ -158,7 +156,7 @@ def _run_stats(ctx: typer.Context) -> None:
     # Validate that database is initialized
     if not config.data_dir.exists():
         error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
@@ -176,7 +174,7 @@ def _run_stats(ctx: typer.Context) -> None:
     finally:
         store.close()
 
-    console.print("[bold]Replay Statistics[/bold]")
+    console.print("[bold]Town Elder Statistics[/bold]")
     console.print(f"  Documents: {count}")
     # Escape brackets in path to avoid Rich markup interpretation
     data_dir_str = str(config.data_dir).replace("[", "\\[").replace("]", "\\]")
@@ -191,10 +189,10 @@ def main(
         None,
         "--data-dir",
         "-d",
-        help="Data directory (default: .replay in current directory or home)",
+        help="Data directory (default: .town_elder in current directory)",
     ),
 ):
-    """replay - Semantic memory for AI agents.
+    """te - Semantic memory for AI agents.
 
     A local-first semantic memory CLI for AI coding agents.
     """
@@ -202,7 +200,7 @@ def main(
     ctx.obj = CLIContext(data_dir=Path(data_dir).expanduser() if data_dir else None)
 
     if ctx.invoked_subcommand is None:
-        console.print("[bold]replay[/bold] - Semantic memory CLI")
+        console.print("[bold]Town Elder[/bold] - Semantic memory CLI")
         console.print("Use --help for usage information")
         raise typer.Exit(code=EXIT_SUCCESS)
 
@@ -229,12 +227,12 @@ def init(  # noqa: PLR0912
         help="Also install post-commit hook for automatic indexing",
     ),
 ) -> None:
-    """Initialize a replay database in the specified directory.
+    """Initialize a Town Elder database in the specified directory.
 
-    Creates a hidden .replay directory with vector storage.
+    Creates a hidden .town_elder directory with vector storage.
     Optionally installs a post-commit hook for automatic commit indexing.
     """
-    from replay.storage import ZvecStore
+    from town_elder.storage import ZvecStore
 
     init_path = Path(path).resolve()
 
@@ -247,7 +245,10 @@ def init(  # noqa: PLR0912
         error_console.print(f"[red]Error: Path is not a directory: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
-    data_dir = _get_data_dir_from_context(ctx) or (init_path / ".replay")
+    # Determine data directory
+    data_dir = _get_data_dir_from_context(ctx)
+    if data_dir is None:
+        data_dir = init_path / ".town_elder"
 
     # Track whether this is a reinitialization
     is_reinit = data_dir.exists()
@@ -280,7 +281,7 @@ def init(  # noqa: PLR0912
         raise typer.Exit(code=EXIT_ERROR)
 
     status = "Reinitialized" if is_reinit else "Initialized"
-    console.print(f"[green]{status} replay database at {data_dir}[/green]")
+    console.print(f"[green]{status} Town Elder database at {data_dir}[/green]")
 
     # Optionally install hook
     if install_hook:
@@ -297,13 +298,13 @@ def init(  # noqa: PLR0912
 
                 # Check if hook already exists
                 if hook_path.exists():
-                    console.print("[yellow]Warning: Hook already exists, skipping. Use 'replay hook install --force' to overwrite[/yellow]")
+                    console.print("[yellow]Warning: Hook already exists, skipping. Use 'te hook install --force' to overwrite[/yellow]")
                 else:
-                    # Use python -m replay for robustness across uv/pyenv environments
+                    # Use python -m town_elder for robustness across uv/pyenv environments
                     # Properly quote path to handle spaces
                     hook_content = f"""#!/bin/sh
-# Replay post-commit hook - automatically indexes commits
-python -m replay --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
+# Town Elder post-commit hook - automatically indexes commits
+python -m town_elder --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
 """
                     hook_path.write_text(hook_content)
                     os.chmod(hook_path, 0o755)
@@ -311,9 +312,9 @@ python -m replay --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --
             except Exception as e:
                 console.print(f"[yellow]Warning: Could not install hook: {e}[/yellow]")
 
-    console.print("[dim]You can now use 'replay add' to add documents[/dim]")
+    console.print("[dim]You can now use 'te add' to add documents[/dim]")
     if not install_hook:
-        console.print("[dim]Run 'replay init --install-hook' to enable automatic commit indexing[/dim]")
+        console.print("[dim]Run 'te init --install-hook' to enable automatic commit indexing[/dim]")
 
 
 @app.command()
@@ -410,7 +411,7 @@ def add(
     # Validate that database is initialized
     if not config.data_dir.exists():
         error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     # Parse metadata with better error message
@@ -492,7 +493,7 @@ def index(  # noqa: PLR0912
     # Validate that database is initialized
     if not config.data_dir.exists():
         error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     index_path = Path(path).resolve()
@@ -616,7 +617,7 @@ def commit_index(  # noqa: PLR0912
     # Validate that database is initialized
     if not config.data_dir.exists():
         error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     repo_path = Path(path).resolve()
@@ -794,14 +795,14 @@ def install(
     # Check if hook already exists
     if hook_path.exists() and not force:
         error_console.print(f"[yellow]Hook already exists at {hook_path}[/yellow]")
-        console.print("Use --force to overwrite, or run 'replay hook uninstall' first")
+        console.print("Use --force to overwrite, or run 'te hook uninstall' first")
         raise typer.Exit(code=EXIT_ERROR)
 
-    # Check if it's a replay hook (ours or someone else's)
+    # Check if it's a Town Elder hook (ours or someone else's)
     if hook_path.exists() and force:
         existing_content = hook_path.read_text()
-        if not _is_replay_hook(existing_content):
-            error_console.print("[yellow]Warning: Existing hook is not a replay hook[/yellow]")
+        if not _is_te_hook(existing_content):
+            error_console.print("[yellow]Warning: Existing hook is not a Town Elder hook[/yellow]")
             console.print("Use --force to overwrite anyway")
 
     # Get the data directory from context (invocation-scoped)
@@ -809,18 +810,18 @@ def install(
     config = get_config(data_dir=data_dir)
 
     # Determine the data_dir to use in the hook - use absolute path for reliability
-    # Use python -m replay for robustness across uv/pyenv environments
+    # Use python -m town_elder for robustness across uv/pyenv environments
     # Properly quote paths to handle spaces
     if data_dir:
         data_dir_arg = f'--data-dir "{config.data_dir}"'
         hook_content = f"""#!/bin/sh
-# Replay post-commit hook - automatically indexes commits
-python -m replay {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
+# Town Elder post-commit hook - automatically indexes commits
+python -m town_elder {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
 """
     else:
         hook_content = """#!/bin/sh
-# Replay post-commit hook - automatically indexes commits
-python -m replay commit-index --repo "$(git rev-parse --show-toplevel)"
+# Town Elder post-commit hook - automatically indexes commits
+python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
 """
 
     hook_path.write_text(hook_content)
@@ -835,7 +836,7 @@ python -m replay commit-index --repo "$(git rev-parse --show-toplevel)"
 @hook_app.command()
 def uninstall(
     path: str = typer.Option(".", "--repo", "-r", help="Git repository path"),
-    force: bool = typer.Option(False, "--force", "-f", help="Allow deletion of non-Replay hooks"),
+    force: bool = typer.Option(False, "--force", "-f", help="Allow deletion of non-Town Elder hooks"),
 ) -> None:
     """Remove post-commit hook."""
     repo_path = Path(path).resolve()
@@ -845,17 +846,17 @@ def uninstall(
         error_console.print(f"[yellow]No post-commit hook found at {hook_path}[/yellow]")
         return
 
-    # Check if it's a replay hook
+    # Check if it's a Town Elder hook
     content = hook_path.read_text()
-    is_replay_hook = _is_replay_hook(content)
+    is_te_hook = _is_te_hook(content)
 
-    if not is_replay_hook and not force:
-        error_console.print("[red]Error: Hook exists but is not a Replay hook[/red]")
-        console.print("[yellow]Use --force to delete non-Replay hooks[/yellow]")
+    if not is_te_hook and not force:
+        error_console.print("[red]Error: Hook exists but is not a Town Elder hook[/red]")
+        console.print("[yellow]Use --force to delete non-Town Elder hooks[/yellow]")
         raise typer.Exit(code=EXIT_ERROR)
 
-    if not is_replay_hook and force:
-        error_console.print("[yellow]Warning: Deleting non-Replay hook (--force specified)[/yellow]")
+    if not is_te_hook and force:
+        error_console.print("[yellow]Warning: Deleting non-Town Elder hook (--force specified)[/yellow]")
 
     hook_path.unlink()
     console.print("[green]Removed post-commit hook[/green]")
@@ -877,17 +878,17 @@ def hook_status(
 
     if not hook_path.exists():
         console.print("[bold]Hook status:[/bold] Not installed")
-        console.print("Run 'replay hook install' to install")
+        console.print("Run 'te hook install' to install")
         return
 
     console.print("[bold]Hook status:[/bold] Installed")
     console.print(f"Hook path: {hook_path}")
 
     content = hook_path.read_text()
-    if _is_replay_hook(content):
-        console.print("Hook type: Replay (automatic indexing)")
+    if _is_te_hook(content):
+        console.print("Hook type: Town Elder (automatic indexing)")
     else:
-        console.print("Hook type: Unknown (not a replay hook)")
+        console.print("Hook type: Unknown (not a Town Elder hook)")
 
 
 app.add_typer(hook_app, name="hook")
@@ -924,7 +925,7 @@ def export(
     # Validate that database is initialized
     if not config.data_dir.exists():
         error_console.print("[red]Error: Database not initialized[/red]")
-        console.print("[dim]Run 'replay init' first to initialize the database[/dim]")
+        console.print("[dim]Run 'te init' first to initialize the database[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     # Determine format from file extension if not explicitly specified

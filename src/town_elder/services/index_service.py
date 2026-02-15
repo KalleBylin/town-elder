@@ -1,13 +1,13 @@
-"""Index service for replay."""
+"""Index service for town_elder."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from replay.config import get_config
-from replay.embeddings import Embedder
-from replay.exceptions import IndexingError
-from replay.storage import ZvecStore
+from town_elder.config import get_config
+from town_elder.embeddings import Embedder
+from town_elder.exceptions import IndexingError
+from town_elder.storage import ZvecStore
 
 
 class IndexService:

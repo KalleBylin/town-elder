@@ -1,4 +1,4 @@
-"""Git diff parser for replay."""
+"""Git diff parser for town_elder."""
 from __future__ import annotations
 
 from collections.abc import Iterator
