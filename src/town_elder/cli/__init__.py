@@ -93,6 +93,37 @@ class CLIContext:
         self.data_dir = data_dir
 
 
+def _is_safe_te_storage_path(data_dir: Path, init_path: Path) -> bool:
+    """Validate that data_dir is a safe te-managed storage location.
+
+    Only allows deletion of directories that are clearly te-managed storage:
+    1. Default .town_elder directory in init path
+    2. Other hidden directories (starting with '.') in init path
+    3. Paths explicitly containing '.town_elder' in their name
+
+    Fails for broad paths like home directory, repo root, /tmp, etc.
+    """
+    resolved_data_dir = data_dir.resolve()
+    resolved_init_path = init_path.resolve()
+
+    # Check if it's the default .town_elder in init path
+    if resolved_data_dir == resolved_init_path / ".town_elder":
+        return True
+
+    # Check if it's a hidden directory in init path
+    if resolved_data_dir.parent == resolved_init_path and resolved_data_dir.name.startswith("."):
+        return True
+
+    # Check if path explicitly contains .town_elder (user-specified te storage)
+    if ".town_elder" in resolved_data_dir.parts:
+        return True
+
+    # Check if it's a hidden directory somewhere in init path
+    return (resolved_init_path in resolved_data_dir.parents or resolved_data_dir.parent == resolved_init_path) and any(
+        part.startswith(".") for part in resolved_data_dir.parts
+    )
+
+
 def _escape_rich(text: str) -> str:
     """Escape brackets to prevent Rich markup interpretation."""
     return text.replace("[", "\\[").replace("]", "\\]")
@@ -274,6 +305,15 @@ def init(  # noqa: PLR0912
 
     # If --force is used and directory exists, clear it first
     if force and data_dir.exists():
+        # Validate that data_dir is a safe te-managed storage location
+        if not _is_safe_te_storage_path(data_dir, init_path):
+            error_console.print(f"[red]Error: Refusing to delete unsafe data-dir path:[/red] {_escape_rich(str(data_dir))}")
+            console.print("[yellow]For safety, --force only allows deletion of te-managed storage:[/yellow]")
+            console.print("  - Default .town_elder directory in the init path")
+            console.print("  - Other hidden directories (starting with '.') in the init path")
+            console.print("  - Paths explicitly containing '.town_elder' in their name")
+            console.print("[dim]Use a safe path or initialize without --force[/dim]")
+            raise typer.Exit(code=EXIT_INVALID_ARG)
         import shutil
         try:
             shutil.rmtree(data_dir)
