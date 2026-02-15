@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from pathlib import Path
 
 import typer
@@ -947,7 +946,7 @@ def install(
 uv run te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
 """
     else:
-        hook_content = f"""#!/bin/sh
+        hook_content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 uv run te commit-index --repo "$(git rev-parse --show-toplevel)"
 """

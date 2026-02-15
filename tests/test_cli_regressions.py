@@ -1,8 +1,10 @@
 """Regression tests for CLI alias dispatch and commit-index state safety."""
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 from typer.testing import CliRunner
@@ -16,6 +18,21 @@ runner = CliRunner()
 _TEST_COMMITS_LARGE = 150  # More than default limit to test backlog handling
 _TEST_COMMITS_MEDIUM = 50
 _TEST_COMMITS_RETRY_COUNT = 49
+
+
+def _get_repo_id(repo_path: Path) -> str:
+    """Generate repo ID matching the CLI's _get_repo_id function."""
+    canonical = str(repo_path.resolve())
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def _get_last_indexed_commit(state_file: Path, repo_path: Path) -> str | None:
+    """Extract last_indexed_commit from repo-scoped state file."""
+    if not state_file.exists():
+        return None
+    state = json.loads(state_file.read_text())
+    repo_id = _get_repo_id(repo_path)
+    return state.get("repos", {}).get(repo_id, {}).get("last_indexed_commit")
 
 
 def test_query_alias_executes_via_shared_helper(monkeypatch):
@@ -159,16 +176,14 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
     assert first_result.exit_code == 0
 
     state_file = data_dir / "index_state.json"
-    first_state = json.loads(state_file.read_text())
-    assert first_state["last_indexed_commit"] == "c1"
+    assert _get_last_indexed_commit(state_file, repo_path) == "c1"
     assert "c2" not in controller.indexed_hashes
 
     controller.fail_hashes.clear()
     second_result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "10"])
     assert second_result.exit_code == 0
 
-    second_state = json.loads(state_file.read_text())
-    assert second_state["last_indexed_commit"] == "c3"
+    assert _get_last_indexed_commit(state_file, repo_path) == "c3"
     assert "c2" in controller.indexed_hashes
 
 
@@ -241,7 +256,7 @@ ate commit-index --repo "$(git rev-parse --show-toplevel)"
 
 
 def test_hook_generation_uses_python_m_town_elder(tmp_path):
-    """Generated hooks should use 'python -m town_elder' for PATH independence."""
+    """Generated hooks should use 'uv run te' for robustness across pyenv/uv environments."""
     # Create a minimal git repo
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
@@ -262,7 +277,8 @@ def test_hook_generation_uses_python_m_town_elder(tmp_path):
     assert hook_path.exists()
 
     hook_content = hook_path.read_text()
-    assert "python -m town_elder" in hook_content
+    # Hook now uses uv run te for robustness across pyenv/uv environments
+    assert "uv run te" in hook_content
     assert "commit-index" in hook_content
 
 
@@ -327,8 +343,11 @@ def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monk
     assert result.exit_code == 0
     # Should warn about missing sentinel
     assert "Warning: Last indexed commit not found" in result.output
-    # Should NOT advance state
-    assert not state_file.exists() or json.loads(state_file.read_text()).get("last_indexed_commit") == "missing_commit"
+    # Should NOT advance state - check repo-scoped format
+    state = json.loads(state_file.read_text())
+    repo_id = _get_repo_id(repo_path)
+    stored_commit = state.get("repos", {}).get(repo_id, {}).get("last_indexed_commit")
+    assert stored_commit == "missing_commit", f"State should not advance. Got: {stored_commit}"
     # Should have indexed all available commits (more than limit, but should get all via pagination)
     assert len(controller.indexed_hashes) == _TEST_COMMITS_LARGE
 
@@ -365,13 +384,13 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
     result1 = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
     assert result1.exit_code == 0
     assert "Warning: Last indexed commit not found" in result1.output
-    first_state = json.loads(state_file.read_text())
-    # State should NOT have advanced
-    assert first_state["last_indexed_commit"] == "old_gc_commit"
+    # State should NOT have advanced (sentinel not found)
+    assert _get_last_indexed_commit(state_file, repo_path) == "old_gc_commit"
     # All commits should have been indexed
     assert len(controller.indexed_hashes) == _TEST_COMMITS_MEDIUM
 
     # Simulate gc: now the state points to c1 (oldest indexed)
+    # Write in legacy format to test migration
     controller.indexed_hashes.clear()
     state_file.write_text(json.dumps({"last_indexed_commit": "c1"}))
 
@@ -379,9 +398,8 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
     result2 = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
     assert result2.exit_code == 0
     assert "Warning" not in result2.output
-    second_state = json.loads(state_file.read_text())
     # State should have advanced to the newest indexed commit
-    assert second_state["last_indexed_commit"] == "c50"
+    assert _get_last_indexed_commit(state_file, repo_path) == "c50"
     # Should have indexed remaining newer commits
     assert len(controller.indexed_hashes) == _TEST_COMMITS_RETRY_COUNT
 
@@ -439,15 +457,14 @@ class TestHookExecution:
             hook_path = repo_path / ".git" / "hooks" / "post-commit"
             assert hook_path.exists()
 
-            # Override hook to use uv run (required for test environment where
-            # python -m town_elder may not work, but uv run always works)
-            hook_content = f"""#!/bin/sh
-# Town Elder post-commit hook - automatically indexes commits
-cd "{repo_path}"
-uv run te --data-dir "{data_dir}" commit-index --repo "{repo_path}"
-"""
-            hook_path.write_text(hook_content)
-            os.chmod(hook_path, 0o755)
+            # Verify the generated hook uses uv run te (robust to pyenv/uv environments)
+            hook_content = hook_path.read_text()
+            assert "uv run te" in hook_content, (
+                f"Hook should use 'uv run te' for robustness. Got: {hook_content}"
+            )
+            assert "python -m town_elder" not in hook_content, (
+                "Hook should not use bare 'python -m town_elder' (not robust)"
+            )
 
             # Verify no index state before commit
             state_file = data_dir / "index_state.json"
@@ -470,10 +487,16 @@ uv run te --data-dir "{data_dir}" commit-index --repo "{repo_path}"
                 "Hook may have failed or not be triggered."
             )
 
-            # 2. The state file contains a valid commit hash
+            # 2. The state file contains a valid commit hash (repo-scoped format)
             state = json.loads(state_file.read_text())
-            assert "last_indexed_commit" in state, "Index state missing last_indexed_commit"
-            commit_hash = state["last_indexed_commit"]
+            # New repo-scoped format has state under repos key
+            assert "repos" in state, "Index state should use repo-scoped format"
+            repos = state["repos"]
+            assert len(repos) == 1, "Should have exactly one repo in state"
+            repo_id = list(repos.keys())[0]
+            repo_state = repos[repo_id]
+            assert "last_indexed_commit" in repo_state, "Index state missing last_indexed_commit"
+            commit_hash = repo_state["last_indexed_commit"]
             assert commit_hash, "last_indexed_commit is empty"
 
             # 3. Verify the commit hash is valid (40 char hex for SHA)
