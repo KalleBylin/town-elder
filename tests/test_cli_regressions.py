@@ -951,3 +951,175 @@ def test_get_config_no_cache_leakage_across_cwd_changes(tmp_path):
         )
     finally:
         os.chdir(original_cwd)
+
+
+class TestTopKValidation:
+    """Tests for --top-k parameter validation in search/query commands.
+
+    Regression tests for: te-17p
+    Previously, negative or zero values for --top-k caused errors.
+    Now they are properly validated with friendly error messages.
+    """
+
+    def test_search_rejects_zero_top_k(self, tmp_path):
+        """te search should reject --top-k=0 with friendly error."""
+        # Create a minimal git repo so search can run
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            ["--data-dir", str(tmp_path / "data"), "search", "test", "--top-k", "0"],
+        )
+
+        assert result.exit_code != 0
+        assert "positive integer" in result.output.lower()
+
+    def test_search_rejects_negative_top_k(self, tmp_path):
+        """te search should reject negative --top-k values with friendly error."""
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            ["--data-dir", str(tmp_path / "data"), "search", "test", "--top-k", "-1"],
+        )
+
+        assert result.exit_code != 0
+        assert "positive integer" in result.output.lower()
+
+    def test_query_rejects_zero_top_k(self, tmp_path):
+        """te query should reject --top-k=0 with friendly error."""
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            ["--data-dir", str(tmp_path / "data"), "query", "test", "--top-k", "0"],
+        )
+
+        assert result.exit_code != 0
+        assert "positive integer" in result.output.lower()
+
+    def test_query_rejects_negative_top_k(self, tmp_path):
+        """te query should reject negative --top-k values with friendly error."""
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            ["--data-dir", str(tmp_path / "data"), "query", "test", "--top-k", "-5"],
+        )
+
+        assert result.exit_code != 0
+        assert "positive integer" in result.output.lower()
+
+    def test_search_accepts_valid_positive_top_k(self, tmp_path):
+        """te search should accept valid positive --top-k values."""
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        # Create a data directory with minimal state
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "vectors.jsonl").write_text("")  # Empty but exists
+
+        result = runner.invoke(
+            cli.app,
+            ["--data-dir", str(data_dir), "search", "test", "--top-k", "10"],
+        )
+
+        # Should not fail with validation error (may fail for other reasons like no results,
+        # but should NOT have "positive integer" error)
+        assert "positive integer" not in result.output.lower()
+
+
+class TestNonTextHookFiles:
+    """Tests for handling non-text (binary) hook files.
+
+    Regression tests for: te-vay
+    Previously, non-UTF8 hook files caused crashes when reading hook content.
+    Now they are handled gracefully with None return and "Unknown" type.
+    """
+
+    def test_hook_status_handles_non_utf8_hook(self, tmp_path):
+        """te hook status should handle non-UTF8 hook files without crashing."""
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        # Create a binary (non-UTF8) hook file
+        hook_path = repo_path / ".git" / "hooks" / "post-commit"
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        hook_path.write_bytes(b"\x00\x01\x02\xff\xfe\xfd")
+
+        result = runner.invoke(
+            cli.app,
+            ["hook", "status", "--repo", str(repo_path)],
+        )
+
+        assert result.exit_code == 0
+        assert "Unknown" in result.output
+
+    def test_hook_uninstall_handles_non_utf8_hook(self, tmp_path):
+        """te hook uninstall should handle non-UTF8 hook files without crashing.
+
+        Non-UTF8 hooks are treated as unknown (not TE hooks). The --force flag
+        is needed to delete unknown hooks.
+        """
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        # Create a binary (non-UTF8) hook file
+        hook_path = repo_path / ".git" / "hooks" / "post-commit"
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        hook_path.write_bytes(b"\x00\x01\x02\xff\xfe\xfd")
+
+        result = runner.invoke(
+            cli.app,
+            ["hook", "uninstall", "--repo", str(repo_path), "--force"],
+        )
+
+        # Should not crash - should handle gracefully with --force
+        assert result.exit_code == 0
+
+    def test_safe_read_hook_returns_none_for_binary(self, tmp_path):
+        """_safe_read_hook should return None for binary (non-UTF8) files."""
+        from town_elder.cli import _safe_read_hook
+
+        # Create a binary file
+        test_file = tmp_path / "binary_file"
+        test_file.write_bytes(b"\x80\x81\x82\xff\xfe\xfd")
+
+        result = _safe_read_hook(test_file)
+
+        assert result is None
+
+    def test_safe_read_hook_returns_content_for_text(self, tmp_path):
+        """_safe_read_hook should return content for valid UTF-8 text files."""
+        from town_elder.cli import _safe_read_hook
+
+        # Create a text file
+        test_file = tmp_path / "text_file"
+        test_file.write_text("#!/bin/sh\necho 'test'")
+
+        result = _safe_read_hook(test_file)
+
+        assert result is not None
+        assert "echo 'test'" in result
+
+    def test_safe_read_hook_returns_none_for_nonexistent(self, tmp_path):
+        """_safe_read_hook should return None for nonexistent files."""
+        from town_elder.cli import _safe_read_hook
+
+        nonexistent = tmp_path / "does_not_exist"
+
+        result = _safe_read_hook(nonexistent)
+
+        assert result is None
