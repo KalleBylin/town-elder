@@ -108,9 +108,9 @@ pip install town-elder
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/town-elder.git
+git clone https://github.com/KalleBylin/town-elder.git
 cd town-elder
-pip install -e .
+uv pip install -e .
 ```
 
 ## Running with uv
