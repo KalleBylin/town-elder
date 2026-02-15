@@ -404,6 +404,127 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
     assert len(controller.indexed_hashes) == _TEST_COMMITS_RETRY_COUNT
 
 
+def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
+    """Two repos sharing same data-dir should maintain independent cursors.
+
+    This is the main regression test for the bug where global cursor state
+    caused cross-repo interference when one data-dir is reused across
+    multiple repositories.
+    """
+    # Create two separate repos
+    repo_a_path = tmp_path / "repo_a"
+    repo_b_path = tmp_path / "repo_b"
+    repo_a_path.mkdir(parents=True)
+    repo_b_path.mkdir(parents=True)
+    (repo_a_path / ".git").mkdir(parents=True)
+    (repo_b_path / ".git").mkdir(parents=True)
+
+    # Shared data directory
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+
+    # Repo A has commits c1, c2, c3
+    commits_a = [_commit(f"c{i}") for i in range(3, 0, -1)]
+    # Repo B has commits d1, d2, d3 (different hashes)
+    commits_b = [_commit(f"d{i}") for i in range(3, 0, -1)]
+
+    config = SimpleNamespace(data_dir=data_dir, embed_model="test-model")
+
+    def fake_get_config(data_dir=None):
+        _ = data_dir
+        return config
+
+    monkeypatch.setattr(cli, "get_config", fake_get_config)
+
+    # === Index Repo A ===
+    controller_a = _StoreController(fail_hashes=set())
+    factory_a = _FakeFactory(git_runner=_FakeGitRunner(commits_a), controller=controller_a)
+
+    def fake_get_service_factory_a(data_dir=None):
+        _ = data_dir
+        return factory_a
+
+    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory_a)
+
+    result_a = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_a_path), "--limit", "10"])
+    assert result_a.exit_code == 0
+
+    state_file = data_dir / "index_state.json"
+
+    # Repo A should have its own cursor (frontier is newest indexed, i.e., c3)
+    assert _get_last_indexed_commit(state_file, repo_a_path) == "c3"
+    # Repo B should NOT have any state yet
+    assert _get_last_indexed_commit(state_file, repo_b_path) is None
+
+    # === Index Repo B ===
+    controller_b = _StoreController(fail_hashes=set())
+    factory_b = _FakeFactory(git_runner=_FakeGitRunner(commits_b), controller=controller_b)
+
+    def fake_get_service_factory_b(data_dir=None):
+        _ = data_dir
+        return factory_b
+
+    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory_b)
+
+    result_b = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_b_path), "--limit", "10"])
+    assert result_b.exit_code == 0
+    # Should NOT have "Warning: Last indexed commit not found" - that's the bug!
+    assert "Warning: Last indexed commit not found" not in result_b.output
+
+    # Both repos should have independent state now (each has its own frontier)
+    assert _get_last_indexed_commit(state_file, repo_a_path) == "c3"
+    assert _get_last_indexed_commit(state_file, repo_b_path) == "d3"
+
+    # State file should have both repos (re-read after repo B indexing)
+    state_after = json.loads(state_file.read_text())
+    assert "repos" in state_after
+    repo_a_id = _get_repo_id(repo_a_path)
+    repo_b_id = _get_repo_id(repo_b_path)
+    assert repo_a_id in state_after["repos"]
+    assert repo_b_id in state_after["repos"]
+
+
+def test_commit_index_legacy_migration(monkeypatch, tmp_path):
+    """Legacy state format should be migrated to repo-scoped format."""
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+
+    # Write legacy format directly
+    state_file = data_dir / "index_state.json"
+    state_file.write_text(json.dumps({"last_indexed_commit": "legacy_commit"}))
+
+    commits = [_commit("c3"), _commit("c2"), _commit("c1")]
+    controller = _StoreController(fail_hashes=set())
+    factory = _FakeFactory(git_runner=_FakeGitRunner(commits), controller=controller)
+    config = SimpleNamespace(data_dir=data_dir, embed_model="test-model")
+
+    def fake_get_config(data_dir=None):
+        _ = data_dir
+        return config
+
+    def fake_get_service_factory(data_dir=None):
+        _ = data_dir
+        return factory
+
+    monkeypatch.setattr(cli, "get_config", fake_get_config)
+    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+
+    result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "10"])
+    assert result.exit_code == 0
+
+    # State file should now be in new format (migrated)
+    state = json.loads(state_file.read_text())
+    assert "repos" in state
+
+    repo_id = _get_repo_id(repo_path)
+    assert repo_id in state["repos"]
+    # Sentinel was not found (legacy_commit not in c1,c2,c3), so state should NOT advance
+    # It remains as the migrated legacy value
+    assert state["repos"][repo_id]["last_indexed_commit"] == "legacy_commit"
+
+
 class TestHookExecution:
     """Tests for actually executing generated hooks."""
 
