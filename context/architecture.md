@@ -1,6 +1,6 @@
-# Replay Architecture
+# te Architecture
 
-Replay is a semantic version control system that provides semantic search over git history. It indexes code changes and commit messages, enabling intent-based retrieval of historical context.
+te is a semantic version control system that provides semantic search over git history. It indexes code changes and commit messages, enabling intent-based retrieval of historical context.
 
 ## High-Level Overview
 
@@ -37,19 +37,19 @@ Replay is a semantic version control system that provides semantic search over g
 
 ## Component Breakdown
 
-### 1. CLI Layer (`replay/cli.py`)
+### 1. CLI Layer (`town_elder/cli.py`)
 
 Entry point using Typer. Provides command-line interface.
 
 **Commands:**
-- `replay init` - Initialize replay storage in `.git/replay`
-- `replay index [range]` - Index commits in range (default: HEAD~10..HEAD)
-- `replay query <text>` - Semantic search over indexed history
-- `replay status` - Show indexing status and statistics
-- `replay hook install` - Install git post-commit hook
-- `replay hook uninstall` - Remove git hook
+- `te init` - Initialize te storage in `.git/te`
+- `te index [range]` - Index commits in range (default: HEAD~10..HEAD)
+- `te query <text>` - Semantic search over indexed history
+- `te status` - Show indexing status and statistics
+- `te hook install` - Install git post-commit hook
+- `te hook uninstall` - Remove git hook
 
-### 2. Core Layer (`replay/core.py`)
+### 2. Core Layer (`town_elder/core.py`)
 
 Orchestrates indexing and retrieval workflows.
 
@@ -58,7 +58,7 @@ Orchestrates indexing and retrieval workflows.
 - Manage configuration loading/merging
 - Handle error propagation and logging
 
-### 3. Indexing Pipeline (`replay/indexing/`)
+### 3. Indexing Pipeline (`town_elder/indexing/`)
 
 **Submodules:**
 
@@ -74,7 +74,7 @@ Orchestrates indexing and retrieval workflows.
   - `init_collection()` - Create zvec collection with schema
   - `upsert_documents(docs)` - Bulk insert/update vectors
 
-### 4. Retrieval Pipeline (`replay/retrieval/`)
+### 4. Retrieval Pipeline (`town_elder/retrieval/`)
 
 - `query_processor.py` - Query handling
   - `embed_query(text)` - Embed user query
@@ -83,7 +83,7 @@ Orchestrates indexing and retrieval workflows.
 - `result_formatter.py` - Output formatting
   - `format_results(hits)` - Format as commit list, code snippets, etc.
 
-### 5. Git Integration (`replay/git/`)
+### 5. Git Integration (`town_elder/git/`)
 
 - `hook.py` - Post-commit hook management
   - `install_hook()` - Create `.git/hooks/post-commit`
@@ -94,7 +94,7 @@ Orchestrates indexing and retrieval workflows.
   - `get_commit_range(start, end)` - Get commits in range
   - `get_diff(commit_hash)` - Get diff for commit
 
-### 6. Configuration (`replay/config.py`)
+### 6. Configuration (`town_elder/config.py`)
 
 - `Config` dataclass - All configuration options
 - `load_config()` - Load from file + environment + defaults
@@ -145,7 +145,7 @@ class IndexedDocument:
 
 ```python
 collection_schema = {
-    "name": "replay_index",
+    "name": "te_index",
     "vectors": {
         "embedding": {
             "dtype": "float32",
@@ -170,7 +170,7 @@ collection_schema = {
 
 ```
 .git/
-└── replay/
+└── te/
     ├── config.yaml          # Local configuration
     ├── index.zvec           # Vector database files
     ├── index.zvec.meta
@@ -179,8 +179,8 @@ collection_schema = {
 ```
 
 **Design Rationale:**
-- `.git/replay` keeps data alongside version control
-- Storage is automatically excluded from git (add `.git/replay` to `.gitignore`)
+- `.git/te` keeps data alongside version control
+- Storage is automatically excluded from git (add `.git/te` to `.gitignore`)
 - Single directory simplifies backup and migration
 
 ## zvec Integration Details
@@ -193,7 +193,7 @@ import zvec
 def init_storage(storage_path: str, dimension: int = 384) -> zvec.Collection:
     """Initialize or open the zvec collection."""
     schema = zvec.CollectionSchema(
-        name="replay_index",
+        name="te_index",
         vectors=zvec.VectorSchema(
             name="embedding",
             dtype=zvec.DataType.VECTOR_FP32,
@@ -354,10 +354,10 @@ Location: `.git/hooks/post-commit`
 
 ```bash
 #!/bin/bash
-# Replay post-commit hook
+# te post-commit hook
 # Triggers incremental indexing of new commits
 
-replay index --incremental
+te index --incremental
 ```
 
 ### Installation
@@ -367,8 +367,8 @@ def install_hook(repo_path: str = "."):
     """Install post-commit hook."""
     hook_path = Path(repo_path) / ".git" / "hooks" / "post-commit"
     hook_content = """#!/bin/bash
-# Installed by Replay - Semantic Version Control
-replay index --incremental 2>/dev/null || true
+# Installed by te - Semantic Version Control
+te index --incremental 2>/dev/null || true
 """
     hook_path.write_text(hook_content)
     hook_path.chmod(0o755)
@@ -403,16 +403,16 @@ def incremental_index(repo_path: str):
 ### Config Schema
 
 ```yaml
-# .git/replay/config.yaml (or specified via --config)
+# .git/te/config.yaml (or specified via --config)
 
 storage:
-  path: ".git/replay"        # Storage directory
+  path: ".git/te"        # Storage directory
   dimension: 384              # Vector dimension
 
 embedding:
   model: "BAAI/bge-small-en-v1.5"
   batch_size: 32
-  cache_dir: ".git/replay/cache/models"
+  cache_dir: ".git/te/cache/models"
 
 indexing:
   chunk_size: 512            # Max tokens per chunk
@@ -440,7 +440,7 @@ import os
 
 @dataclass
 class Config:
-    storage_path: str = ".git/replay"
+    storage_path: str = ".git/te"
     dimension: int = 384
     model: str = "BAAI/bge-small-en-v1.5"
     batch_size: int = 32
@@ -456,17 +456,17 @@ def load_config(config_path: Optional[Path] = None) -> Config:
 
     # 2. Load from file if exists
     if config_path is None:
-        config_path = Path(".git/replay/config.yaml")
+        config_path = Path(".git/te/config.yaml")
 
     if config_path.exists():
         file_config = load_yaml(config_path)
         config = merge(config, file_config)
 
     # 3. Environment variables override
-    if os.getenv("REPLAY_MODEL"):
-        config.model = os.getenv("REPLAY_MODEL")
-    if os.getenv("REPLAY_STORAGE_PATH"):
-        config.storage_path = os.getenv("REPLAY_STORAGE_PATH")
+    if os.getenv("TE_MODEL"):
+        config.model = os.getenv("TE_MODEL")
+    if os.getenv("TE_STORAGE_PATH"):
+        config.storage_path = os.getenv("TE_STORAGE_PATH")
 
     return config
 ```
@@ -474,8 +474,8 @@ def load_config(config_path: Optional[Path] = None) -> Config:
 ## Project Structure
 
 ```
-replay/
-├── replay/
+town_elder/
+├── src/town_elder/
 │   ├── __init__.py
 │   ├── cli.py              # Typer CLI entry point
 │   ├── core.py             # Core orchestration
@@ -502,7 +502,7 @@ replay/
 ├── pyproject.toml
 ├── README.md
 └── .git/
-    └── replay/              # Created at runtime
+    └── te/              # Created at runtime
 ```
 
 ## Usage Examples
@@ -512,29 +512,29 @@ replay/
 ```bash
 # Initialize in a git repository
 cd my-project
-replay init
+te init
 
 # Install post-commit hook for automatic indexing
-replay hook install
+te hook install
 
 # Index initial history
-replay index HEAD~100..HEAD
+te index HEAD~100..HEAD
 ```
 
 ### Querying
 
 ```bash
 # Semantic search
-replay query "authentication retry logic"
+te query "authentication retry logic"
 
 # Filter by file
-replay query "payment validation" --file "src/payment.py"
+te query "payment validation" --file "src/payment.py"
 
 # Filter by author
-replay query "bug fix" --author "alice"
+te query "bug fix" --author "alice"
 
 # Show top 20 results
-replay query "refactor" --top-k 20
+te query "refactor" --top-k 20
 ```
 
 ### Output Format

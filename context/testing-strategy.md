@@ -1,8 +1,8 @@
-# Testing Strategy for Replay
+# Testing Strategy for Town Elder
 
 ## Project Overview
 
-Replay is a Python CLI tool using:
+Town Elder is a Python CLI tool using:
 - **typer** - CLI framework
 - **zvec** - Embedded vector database (Proxima engine)
 - **fastembed** - Local embedding generation (ONNX-based)
@@ -86,7 +86,7 @@ from unittest.mock import MagicMock, patch
 
 @pytest.fixture
 def mock_zvec():
-    with patch('replay.vector_store.zvec') as mock:
+    with patch('town_elder.vector_store.zvec') as mock:
         # Mock collection schema
         mock.CollectionSchema.return_value = MagicMock()
         mock.VectorSchema.return_value = MagicMock()
@@ -105,7 +105,7 @@ import numpy as np
 
 @pytest.fixture
 def mock_fastembed():
-    with patch('replay.embedding.fastembed') as mock:
+    with patch('town_elder.embedding.fastembed') as mock:
         mock_model = MagicMock()
         # Return fixed embedding vectors for deterministic tests
         def mock_embed(texts):
@@ -126,7 +126,7 @@ from unittest.mock import MagicMock, patch
 
 @pytest.fixture
 def mock_git():
-    with patch('replay.vcs.git') as mock:
+    with patch('town_elder.vcs.git') as mock:
         mock_repo = MagicMock()
         mock_repo.head.commit.hexsha = "abc123"
         mock_repo.iter_commits.return_value = []
@@ -143,7 +143,7 @@ from unittest.mock import MagicMock, patch
 
 class TestVectorStore:
     def test_insert_document(self, mock_zvec):
-        from replay.vector_store import VectorStore
+        from town_elder.vector_store import VectorStore
 
         store = VectorStore(":memory:")
         store.insert("test text", {"source": "test"})
@@ -152,7 +152,7 @@ class TestVectorStore:
         mock_zvec.create_and_open.assert_called_once()
 
     def test_search_returns_results(self, mock_zvec, mock_fastembed):
-        from replay.vector_store import VectorStore
+        from town_elder.vector_store import VectorStore
 
         # Setup mock search results
         mock_collection = mock_zvec.create_and_open.return_value
@@ -241,7 +241,7 @@ class TestFastEmbedIntegration:
 # tests/integration/test_cli_commands.py
 import pytest
 from typer.testing import CliRunner
-from replay.cli import app
+from town_elder.cli import app
 
 runner = CliRunner()
 
@@ -273,7 +273,7 @@ import pytest
 import tempfile
 import os
 from pathlib import Path
-from replay.cli import app
+from town_elder.cli import app
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -344,7 +344,7 @@ jobs:
 
       - name: Run unit tests (fast, mocked)
         run: |
-          pytest tests/unit -v --cov=replay --cov-report=xml
+          pytest tests/unit -v --cov=town_elder --cov-report=xml
 
       - name: Run integration tests
         run: |
@@ -376,7 +376,7 @@ repos:
 
       - id: lint
         name: Lint
-        entry: ruff check replay/
+        entry: ruff check src/town_elder/
         language: system
         pass_filenames: true
 ```
@@ -396,7 +396,7 @@ repos:
 ```toml
 # pyproject.toml
 [tool.coverage.run]
-source = ["replay"]
+source = ["town_elder"]
 omit = [
     "*/tests/*",
     "*/mocks/*",
@@ -434,7 +434,7 @@ class TestEmbeddingProperties:
     @settings(max_examples=10)
     def test_embedding_dimension_consistency(self, texts, mock_fastembed):
         """Embeddings should always have consistent dimensions."""
-        from replay.embedding import Embedder
+        from town_elder.embedding import Embedder
 
         embedder = Embedder()
         embeddings = embedder.embed(texts)
@@ -447,7 +447,7 @@ class TestEmbeddingProperties:
     @settings(max_examples=50)
     def test_empty_text_handling(self, text):
         """Non-empty text should produce valid embeddings."""
-        from replay.embedding import Embedder
+        from town_elder.embedding import Embedder
 
         embedder = Embedder()
         result = embedder.embed([text])
@@ -467,7 +467,7 @@ class TestEmbeddingProperties:
 )
 def test_vector_normalization(vectors):
     """Vectors should be normalized after processing."""
-    from replay.vector_store import normalize_vector
+    from town_elder.vector_store import normalize_vector
 
     for vector in vectors:
         normalized = normalize_vector(vector)
@@ -532,7 +532,7 @@ pytest
 pytest tests/unit -v
 
 # With coverage
-pytest --cov=replay --cov-report=html
+pytest --cov=town_elder --cov-report=html
 
 # Parallel execution
 pytest -n auto

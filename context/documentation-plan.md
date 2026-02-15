@@ -1,7 +1,7 @@
-# Documentation Plan for Replay
+# Documentation Plan for te
 
 ## Project Overview
-Replay is a CLI tool for semantic git retrieval using zvec (embedded vector database) + fastembed (local embeddings). It enables searching git history by meaning rather than just keywords.
+te is a CLI tool for semantic git retrieval using zvec (embedded vector database) + fastembed (local embeddings). It enables searching git history by meaning rather than just keywords.
 
 ---
 
@@ -52,7 +52,7 @@ docs/
 The README should be a single file with essential info:
 
 ```markdown
-# Replay
+# te
 
 Semantic git retrieval using zvec + fastembed.
 
@@ -68,13 +68,13 @@ Semantic git retrieval using zvec + fastembed.
 
 ## Installation
 
-`pip install replay-cli`
+`pip install town-elder`
 
 [Link to full docs]
 
 ## Usage
 
-$ replay query "fix authentication bug"
+$ te query "fix authentication bug"
 [show example output]
 
 ## Documentation
@@ -82,7 +82,7 @@ $ replay query "fix authentication bug"
 [Link to docs site]
 ```
 
-**Location**: `/Users/bylin/Code/replay/README.md`
+**Location**: `/Users/bylin/Code/town_elder/README.md`
 
 ---
 
@@ -98,7 +98,7 @@ $ replay query "fix authentication bug"
 - Initializing a repository index
 - Indexing existing commit history
 - Incremental updates
-- Index storage location (`.git/replay/`)
+- Index storage location (`.git/te/`)
 
 ### 2.3 Git Hooks (`usage/git-hooks.md`)
 - Setting up post-commit hooks
@@ -114,7 +114,7 @@ $ replay query "fix authentication bug"
 Complete command reference with examples:
 
 ```markdown
-## replay init
+## te init
 
 Initialize semantic index for repository.
 
@@ -123,9 +123,9 @@ Initialize semantic index for repository.
 - `--batch-size INT`  Indexing batch size (default: 32)
 
 ### Example
-$ replay init --model BAAI/bge-small-en-v1.5
+$ te init --model BAAI/bge-small-en-v1.5
 
-## replay query
+## te query
 
 Search commit history semantically.
 
@@ -136,7 +136,7 @@ Search commit history semantically.
 - `--format FORMAT`    Output format: json, text
 
 ### Example
-$ replay query "race condition in retry logic" -k 10
+$ te query "race condition in retry logic" -k 10
 ```
 
 ---
@@ -144,9 +144,9 @@ $ replay query "race condition in retry logic" -k 10
 ## 4. Architecture Docs
 
 ### 4.1 High-Level Overview (`architecture/index.md`)
-- What Replay does and why
+- What te does and why
 - Core concepts: semantic search, vector embeddings
-- When to use Replay vs. standard git search
+- When to use te vs. standard git search
 
 ### 4.2 Components (`architecture/components.md`)
 - **zvec**: Embedded vector database, Proxima engine

@@ -1,13 +1,13 @@
-# replay CLI Design
+# te CLI Design
 
 ## Overview
 
-`replay` is a semantic version control system that provides context-aware search over git history. It indexes commits and code changes as semantic vectors, enabling developers to query their project's history by meaning rather than just keywords.
+`te` is a semantic version control system that provides context-aware search over git history. It indexes commits and code changes as semantic vectors, enabling developers to query their project's history by meaning rather than just keywords.
 
 ## Core Philosophy
 
-- **Local-First**: No external services, all data stored in `.git/replay/`
-- **Zero-Ops**: `pip install replay` and it just works
+- **Local-First**: No external services, all data stored in `.git/te/`
+- **Zero-Ops**: `pip install town-elder` and it just works
 - **Dual Output**: Human-readable for exploration, JSON for scripting
 - **Typer-Native**: Rich CLI with auto-completion, validation, and good help text
 
@@ -16,7 +16,7 @@
 ## Command Structure
 
 ```
-replay [OPTIONS] COMMAND [ARGS]...
+te [OPTIONS] COMMAND [ARGS]...
 ```
 
 ### Main Commands
@@ -26,18 +26,18 @@ replay [OPTIONS] COMMAND [ARGS]...
 | `query` | Search the semantic index |
 | `index` | Manually trigger indexing |
 | `status` | Show index health and stats |
-| `init` | Initialize replay in a repository |
+| `init` | Initialize te in a repository |
 
 ---
 
 ## Commands Detail
 
-### 1. `replay init`
+### 1. `te init`
 
-Initialize replay in the current git repository. Creates the vector store and installs git hooks.
+Initialize te in the current git repository. Creates the vector store and installs git hooks.
 
 ```bash
-replay init [OPTIONS]
+te init [OPTIONS]
 ```
 
 **Options:**
@@ -45,22 +45,22 @@ replay init [OPTIONS]
 
 **Output:**
 ```
-Initialized replay in /path/to/repo/.git/replay/
+Initialized te in /path/to/repo/.git/te/
 ✓ Created vector store
 ✓ Installed post-commit hook
 ✓ Downloaded embedding model (first run only)
 
-Run 'replay status' to verify setup.
+Run 'te status' to verify setup.
 ```
 
 ---
 
-### 2. `replay query <query_text>`
+### 2. `te query <query_text>`
 
 Search the semantic index for commits and code changes related to your query.
 
 ```bash
-replay query [OPTIONS] QUERY
+te query [OPTIONS] QUERY
 ```
 
 **Arguments:**
@@ -125,12 +125,12 @@ def5678 0.87 Initial implementation of retry mechanism
 
 ---
 
-### 3. `replay index`
+### 3. `te index`
 
 Manually trigger indexing of unindexed commits. Normally runs automatically via post-commit hook.
 
 ```bash
-replay index [OPTIONS]
+te index [OPTIONS]
 ```
 
 **Options:**
@@ -165,12 +165,12 @@ Indexing 3 new commits...
 
 ---
 
-### 4. `replay status`
+### 4. `te status`
 
 Show index health, statistics, and configuration.
 
 ```bash
-replay status [OPTIONS]
+te status [OPTIONS]
 ```
 
 **Options:**
@@ -179,10 +179,10 @@ replay status [OPTIONS]
 
 **Output:**
 ```
-replay status
+te status
 
 Repository: /path/to/repo
-Index: .git/replay/
+Index: .git/te/
 
 Statistics:
   - Total commits indexed: 1,247
@@ -219,14 +219,14 @@ Status: ✓ Healthy
 ### File Location
 
 Config is read from (in order of precedence):
-1. `./replay.yaml` (project root)
-2. `./.replay.yaml` (project root)
-3. `~/.config/replay/config.yaml` (user home)
+1. `./te.yaml` (project root)
+2. `./.te.yaml` (project root)
+3. `~/.config/te/config.yaml` (user home)
 
 ### Config Schema
 
 ```yaml
-# .replay.yaml
+# te.yaml
 index:
   # Embedding model (default: BAAI/bge-small-en-v1.5)
   embedding_model: BAAI/bge-small-en-v1.5
@@ -271,14 +271,14 @@ All errors include context and suggested fixes:
 ```
 Error: Not a git repository
 
-  replay must be run from within a git repository.
-  Run 'git init' first, then 'replay init'.
+  te must be run from within a git repository.
+  Run 'git init' first, then 'te init'.
 ```
 
 ```
 Error: Index not initialized
 
-  Run 'replay init' to set up the semantic index.
+  Run 'te init' to set up the semantic index.
   This only needs to be done once per repository.
 ```
 
@@ -287,7 +287,7 @@ Error: Embedding model not found
 
   Failed to download embedding model.
   Check your internet connection, then run:
-    replay init --force
+    te init --force
 ```
 
 ```
@@ -295,7 +295,7 @@ Error: No commits to index
 
   The repository has no commits yet.
   Make at least one commit, then run:
-    replay index
+    te index
 ```
 
 ### Exit Codes
@@ -307,7 +307,7 @@ Error: No commits to index
 | 2 | Invalid usage (bad arguments) |
 | 3 | Not a git repository |
 | 4 | Index not initialized |
-| 5 | Index corrupted (run `replay index --all` to rebuild) |
+| 5 | Index corrupted (run `te index --all` to rebuild) |
 
 ---
 
@@ -315,12 +315,12 @@ Error: No commits to index
 
 ### Post-Commit Hook
 
-When initialized, replay installs a post-commit hook that automatically indexes new commits:
+When initialized, te installs a post-commit hook that automatically indexes new commits:
 
 ```bash
 # .git/hooks/post-commit
 #!/bin/sh
-replay index --commit HEAD --quiet
+te index --commit HEAD --quiet
 ```
 
 The hook runs silently unless `--verbose` or there's an error.
@@ -329,7 +329,7 @@ The hook runs silently unless `--verbose` or there's an error.
 
 ```bash
 # Install hook manually
-replay init
+te init
 
 # Remove hook
 rm .git/hooks/post-commit
@@ -343,13 +343,13 @@ Typer provides shell completions for bash, zsh, fish, and PowerShell:
 
 ```bash
 # Add to .bashrc or .zshrc
-eval "$(replay --install-completion bash)"
+eval "$(te --install-completion bash)"
 ```
 
 This enables:
-- Command completion: `replay q<TAB>` → `replay query`
-- Option completion: `replay query --f<TAB>` → `--format`
-- Argument completion: `replay query "auth"<TAB>` (shows recent queries)
+- Command completion: `te q<TAB>` → `te query`
+- Option completion: `te query --f<TAB>` → `--format`
+- Argument completion: `te query "auth"<TAB>` (shows recent queries)
 
 ---
 
@@ -360,25 +360,25 @@ This enables:
 ```bash
 # Initialize in a new repo
 cd my-project
-replay init
+te init
 
 # ... make some commits ...
 
 # Find related changes
-replay query "payment validation" -n 10
+te query "payment validation" -n 10
 
 # Check index health
-replay status
+te status
 
 # Rebuild index if corrupted
-replay index --all
+te index --all
 ```
 
 ### CI/CD Integration
 
 ```bash
 # In CI: index a commit range after push
-replay index --range $CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA --json > index.json
+te index --range $CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA --json > index.json
 
 # Parse results
 cat index.json | jq '.indexed'
@@ -388,7 +388,7 @@ cat index.json | jq '.indexed'
 
 ```bash
 # Find all commits by author touching specific files
-replay query "bug fix" --author "jane@example.com" --path "src/*.py" --json | \
+te query "bug fix" --author "jane@example.com" --path "src/*.py" --json | \
   jq '.results[] | {commit: .commit, message: .message}'
 ```
 
@@ -398,13 +398,13 @@ replay query "bug fix" --author "jane@example.com" --path "src/*.py" --json | \
 
 ### Planned Features (Out of Scope for v1)
 
-- `replay blame`: Semantic blame (find conceptually related changes)
-- `replay diff <query>`: Show semantic diff between commits
-- `replay context`: Generate AGENTS.md context for AI agents
+- `te blame`: Semantic blame (find conceptually related changes)
+- `te diff <query>`: Show semantic diff between commits
+- `te context`: Generate AGENTS.md context for AI agents
 - `--interactive`: Interactive query mode with refinement
 
 ### Integration Points
 
-- **MCP Server**: Expose replay as a Model Context Protocol tool
-- **GitHub CLI**: `gh extension install replay` for GitHub integration
-- **Pre-commit**: `replay` as a pre-commit hook for arch review
+- **MCP Server**: Expose te as a Model Context Protocol tool
+- **GitHub CLI**: `gh extension install town-elder` for GitHub integration
+- **Pre-commit**: `te` as a pre-commit hook for arch review

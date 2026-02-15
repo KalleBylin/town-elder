@@ -1,9 +1,9 @@
-# Replay Project: Critical Risk Analysis
+# te Project: Critical Risk Analysis
 
 **Role: Devil's Advocate**
 **Date: 2026-02-13**
 
-This document provides a critical analysis of potential issues, risks, and edge cases for the Replay project (semantic git using zvec + fastembed).
+This document provides a critical analysis of potential issues, risks, and edge cases for the te project (semantic git using zvec + fastembed).
 
 ---
 

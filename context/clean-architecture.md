@@ -1,8 +1,8 @@
-# Clean Architecture Design for Replay
+# Clean Architecture Design for te
 
 ## Project Overview
 
-**Replay** is a Python CLI tool that provides semantic memory capabilities using zvec (embedded vector database) and fastembed (embedding generation). It supports two primary flows: **index** (ingesting documents with embeddings) and **query** (semantic search).
+**te** is a Python CLI tool that provides semantic memory capabilities using zvec (embedded vector database) and fastembed (embedding generation). It supports two primary flows: **index** (ingesting documents with embeddings) and **query** (semantic search).
 
 ## Architecture Principles
 
@@ -36,17 +36,17 @@
 ## Module Structure
 
 ```
-replay/
-├── replay/
+town_elder/
+├── src/town_elder/
 │   ├── __init__.py
 │   ├── cli/                      # CLI Layer
 │   │   ├── __init__.py
 │   │   ├── app.py                # Typer application entry point
 │   │   ├── commands/
 │   │   │   ├── __init__.py
-│   │   │   ├── index.py          # "replay index" command
-│   │   │   ├── query.py          # "replay query" command
-│   │   │   └── status.py         # "replay status" command
+│   │   │   ├── index.py          # "te index" command
+│   │   │   ├── query.py          # "te query" command
+│   │   │   └── status.py         # "te status" command
 │   │   └── options.py            # Shared CLI options
 │   │
 │   ├── application/              # Application Layer
@@ -108,7 +108,7 @@ replay/
 # application/ports/vector_store.py
 from abc import ABC, abstractmethod
 from typing import List
-from replay.application.dtos import SearchResultDTO
+from town_elder.application.dtos import SearchResultDTO
 
 class VectorStorePort(ABC):
     """Port interface for vector storage operations."""
@@ -151,7 +151,7 @@ class EmbeddingServicePort(ABC):
 
 ```python
 # infrastructure/services/fastembed_service.py
-from replay.application.ports.embedding_service import EmbeddingServicePort
+from town_elder.application.ports.embedding_service import EmbeddingServicePort
 
 class FastEmbedService(EmbeddingServicePort):
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
@@ -173,13 +173,13 @@ class FastEmbedService(EmbeddingServicePort):
 
 
 # infrastructure/repositories/zvec_repository.py
-from replay.application.ports.vector_store import VectorStorePort
+from town_elder.application.ports.vector_store import VectorStorePort
 
 class ZvecRepository(VectorStorePort):
     def __init__(self, collection_path: str, dimension: int):
         import zvec
         schema = zvec.CollectionSchema(
-            name="replay",
+            name="te",
             vectors=zvec.VectorSchema("embedding", zvec.DataType.VECTOR_FP32, dimension)
         )
         self._collection = zvec.create_and_open(path=collection_path, schema=schema)
@@ -242,21 +242,21 @@ def create_services(config_path: str = None) -> Services:
 ```python
 # domain/exceptions/__init__.py
 
-class ReplayError(Exception):
-    """Base exception for all replay errors."""
+class TeError(Exception):
+    """Base exception for all te errors."""
     pass
 
-class DocumentNotFoundError(ReplayError):
+class DocumentNotFoundError(TeError):
     """Raised when a document cannot be found."""
     def __init__(self, document_id: str):
         self.document_id = document_id
         super().__init__(f"Document not found: {document_id}")
 
-class IndexingError(ReplayError):
+class IndexingError(TeError):
     """Raised when indexing fails."""
     pass
 
-class QueryError(ReplayError):
+class QueryError(TeError):
     """Raised when search fails."""
     pass
 ```
@@ -266,12 +266,12 @@ class QueryError(ReplayError):
 ```python
 # cli/app.py
 import typer
-from replay.domain.exceptions import ReplayError
+from town_elder.domain.exceptions import TeError
 
 app = typer.Typer()
 
-@app.exception_handler(ReplayError)
-def replay_exception_handler(request: typer.Request, exc: ReplayError):
+@app.exception_handler(TeError)
+def te_exception_handler(request: typer.Request, exc: TeError):
     typer.echo(f"Error: {exc}", err=True)
     raise typer.Exit(code=1)
 ```
@@ -328,7 +328,7 @@ Configure via settings:
 # config.yaml
 storage:
   provider: zvec  # or "chroma", "lancedb"
-  path: .replay/vectors
+  path: .te/vectors
 ```
 
 ### 3. Adding New Commands
@@ -337,10 +337,10 @@ Extend CLI by adding new command modules:
 
 ```
 cli/commands/
-    ├── index.py       # "replay index"
-    ├── query.py       # "replay query"
-    ├── delete.py      # "replay delete"  (new)
-    └── stats.py       # "replay stats"  (new)
+    ├── index.py       # "te index"
+    ├── query.py       # "te query"
+    ├── delete.py      # "te delete"  (new)
+    └── stats.py       # "te stats"  (new)
 ```
 
 Register in `app.py`:
@@ -361,7 +361,7 @@ app.add_typer(commands.delete.app, name="delete")  # new
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
-from replay.domain.value_objects import DocumentId, Vector
+from town_elder.domain.value_objects import DocumentId, Vector
 
 @dataclass
 class Document:
@@ -492,7 +492,7 @@ def index(
     metadata_file: Optional[Path] = typer.Option(None, help="JSON file with metadata"),
 ):
     """Index documents for semantic search."""
-    from replay.infrastructure.factories.service_factory import create_services
+    from town_elder.infrastructure.factories.service_factory import create_services
 
     services = create_services()
 
@@ -524,7 +524,7 @@ def query(
     top_k: int = typer.Option(5, help="Number of results"),
 ):
     """Search indexed documents."""
-    from replay.infrastructure.factories.service_factory import create_services
+    from town_elder.infrastructure.factories.service_factory import create_services
 
     services = create_services()
 
@@ -543,11 +543,11 @@ def query(
 ## Configuration
 
 ```yaml
-# .replay/config.yaml
-replay:
+# .te/config.yaml
+te:
   storage:
     provider: zvec
-    path: .replay/vectors.db
+    path: .te/vectors.db
 
   embedding:
     provider: fastembed

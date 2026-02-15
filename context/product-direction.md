@@ -1,8 +1,8 @@
-# Product Direction: Replay
+# Product Direction: te
 
 **Version Control for AI Agents**
 
-Replay is a semantic version control system that helps AI coding agents retrieve context from git history using semantic search. Built on zvec (embedded vector database) and fastembed (local embeddings), Replay operates entirely locally—no cloud services, no external APIs, no operational overhead.
+te is a semantic version control system that helps AI coding agents retrieve context from git history using semantic search. Built on zvec (embedded vector database) and fastembed (local embeddings), te operates entirely locally—no cloud services, no external APIs, no operational overhead.
 
 ---
 
@@ -31,7 +31,7 @@ Replay is a semantic version control system that helps AI coding agents retrieve
 
 1. **Semantic Search of Git History**
    - Query: "Find commits related to authentication retry logic"
-   - Instead of keyword matching, Replay retrieves semantically similar commits
+   - Instead of keyword matching, te retrieves semantically similar commits
    - Understands conceptual relationships (e.g., "retry" relates to "backoff", "rate limiting")
 
 2. **Finding Related Commits**
@@ -98,7 +98,7 @@ Replay is a semantic version control system that helps AI coding agents retrieve
 - **Vector Database**: zvec (embedded, in-process)
 - **Embeddings**: fastembed (quantized ONNX, runs locally)
 - **Indexing**: Tree-sitter for code chunking
-- **Storage**: Local files in `.git/replay/`
+- **Storage**: Local files in `.git/te/`
 
 ### Design Principles
 
@@ -116,7 +116,7 @@ Replay is a semantic version control system that helps AI coding agents retrieve
 **Goal**: Enable semantic search of git history
 
 - Post-commit hook that auto-indexes new commits
-- CLI tool: `replay search "authentication retry logic"`
+- CLI tool: `te search "authentication retry logic"`
 - Returns matching commits with diffs
 - Support for major languages (Python, JS, Go, Rust)
 
@@ -155,7 +155,7 @@ Replay is a semantic version control system that helps AI coding agents retrieve
 ### Adoption Metrics
 
 1. **Installation Count**: Downloads via pip
-2. **Active Repositories**: Number of repos with replay index initialized
+2. **Active Repositories**: Number of repos with te index initialized
 3. **Query Volume**: Number of semantic queries executed
 
 ### Engagement Metrics
@@ -176,7 +176,7 @@ Replay is a semantic version control system that helps AI coding agents retrieve
 
 ### Open Source (MIT License)
 
-Replay will be free and open source under the MIT license.
+te will be free and open source under the MIT license.
 
 **Rationale**:
 - Local-first tools benefit from community trust
@@ -207,7 +207,7 @@ For now, focus entirely on open source adoption.
 | Pinecone/Weaviate | Cloud vector DB | Requires cloud, not local |
 | grep.app | Regex search | No semantic search |
 
-### Replay's Differentiation
+### te's Differentiation
 
 - **Truly Local**: No cloud dependency unlike Pinecone/Weaviate
 - **Git-Native**: Built specifically for git history semantics
@@ -229,6 +229,6 @@ For now, focus entirely on open source adoption.
 
 ## Conclusion
 
-Replay addresses a fundamental problem in AI-assisted development: agent amnesia. By making git history semantically searchable, we enable agents to understand the "why" behind code, not just the "what".
+te addresses a fundamental problem in AI-assisted development: agent amnesia. By making git history semantically searchable, we enable agents to understand the "why" behind code, not just the "what".
 
-Our local-first, zero-ops approach removes the friction of cloud infrastructure and privacy concerns. Replay is built for the era of autonomous agents—where memory is infrastructure, and context is king.
+Our local-first, zero-ops approach removes the friction of cloud infrastructure and privacy concerns. te is built for the era of autonomous agents—where memory is infrastructure, and context is king.

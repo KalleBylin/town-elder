@@ -1,10 +1,10 @@
-# RAG Implementation Plan for Replay
+# RAG Implementation Plan for te
 
-This document outlines the implementation strategy for the Retrieval-Augmented Generation (RAG) system in Replay, providing semantic search over git history using zvec and FastEmbed.
+This document outlines the implementation strategy for the Retrieval-Augmented Generation (RAG) system in te, providing semantic search over git history using zvec and FastEmbed.
 
 ## Overview
 
-Replay's RAG system enables semantic search across git history, allowing AI coding agents to:
+te's RAG system enables semantic search across git history, allowing AI coding agents to:
 - Find relevant commits based on intent (not just keywords)
 - Understand why code was changed (tribal knowledge)
 - Search across diffs, commit messages, and file contents
@@ -603,17 +603,17 @@ class AsyncIndexer:
 ```bash
 # .git/hooks/post-commit
 #!/bin/bash
-python -m replay.indexer --commit $(git rev-parse HEAD)
+python -m town_elder.indexer --commit $(git rev-parse HEAD)
 ```
 
 ### CLI Interface
 
 ```python
 # Proposed CLI commands
- replay search "authentication bug fix" --author john@example.com
- replay search "rate limiting" --file "*.py" --date-after 2024-01-01
- replay index --repo . --full  # Full rebuild
- replay index --repo . --incremental  # New commits only
+ te search "authentication bug fix" --author john@example.com
+ te search "rate limiting" --file "*.py" --date-after 2024-01-01
+ te index --repo . --full  # Full rebuild
+ te index --repo . --incremental  # New commits only
 ```
 
 ## 8. Open Questions

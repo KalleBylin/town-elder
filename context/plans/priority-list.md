@@ -1,6 +1,6 @@
-# Replay Project - Comprehensive Priority List
+# Town Elder - Comprehensive Priority List
 
-Generated from research documents in /Users/bylin/Code/replay/context/
+Generated from research documents in /Users/bylin/Code/town_elder/context/
 
 ---
 
@@ -22,10 +22,10 @@ Generated from research documents in /Users/bylin/Code/replay/context/
 | P0 | Embedding model: BAAI/bge-small-en-v1.5 (384 dimensions) | rag-implementation.md | zvec |
 | P0 | Git diff parsing | architecture.md | Git |
 | P0 | Code chunking (basic line-based) | rag-implementation.md | None |
-| P0 | `replay init` command | cli-design.md | None |
-| P0 | `replay index` command | cli-design.md, architecture.md | zvec, fastembed |
-| P0 | `replay query` command | cli-design.md, architecture.md | zvec, fastembed |
-| P0 | `replay status` command | cli-design.md | None |
+| P0 | `te init` command | cli-design.md | None |
+| P0 | `te index` command | cli-design.md, architecture.md | zvec, fastembed |
+| P0 | `te query` command | cli-design.md, architecture.md | zvec, fastembed |
+| P0 | `te status` command | cli-design.md | None |
 
 ### 3. Git Integration
 | Priority | Item | Source Document | Dependencies |
@@ -69,7 +69,7 @@ Generated from research documents in /Users/bylin/Code/replay/context/
 | P1 | Output formats (text, json, compact) | cli-design.md | rich |
 | P1 | Shell completions (bash, zsh, fish) | cli-design.md | typer |
 | P1 | Verbose/quiet flags | cli-design.md | None |
-| P1 | Config file support (replay.yaml, .replay.yaml, ~/.config/replay/) | cli-design.md | None |
+| P1 | Config file support (te.yaml, .te.yaml, ~/.config/te/) | cli-design.md | None |
 
 ### 3. Error Handling
 | Priority | Item | Source Document | Dependencies |

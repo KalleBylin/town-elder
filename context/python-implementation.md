@@ -1,24 +1,24 @@
-# Python Implementation Plan: replay CLI
+# Python Implementation Plan: te CLI
 
 ## Overview
 
-The replay CLI is a local-first semantic memory tool for AI coding agents. It provides vector-based storage and retrieval using zvec and fastembed, with a typer-based command interface.
+The te CLI is a local-first semantic memory tool for AI coding agents. It provides vector-based storage and retrieval using zvec and fastembed, with a typer-based command interface.
 
 ## Project Structure
 
 ```
-replay/
-├── replay/
+town_elder/
+├── src/town_elder/
 │   ├── __init__.py          # Package version
 │   ├── cli.py               # Typer CLI entry point
 │   ├── commands/             # Command modules
 │   │   ├── __init__.py
-│   │   ├── init.py          # 'replay init' - Initialize database
-│   │   ├── index.py         # 'replay index' - Index content
-│   │   ├── search.py        # 'replay search' - Semantic search
-│   │   ├── add.py           # 'replay add' - Add documents
-│   │   ├── stats.py         # 'replay stats' - Show stats
-│   │   └── export.py        # 'replay export' - Export data
+│   │   ├── init.py          # 'te init' - Initialize database
+│   │   ├── index.py         # 'te index' - Index content
+│   │   ├── search.py        # 'te search' - Semantic search
+│   │   ├── add.py           # 'te add' - Add documents
+│   │   ├── stats.py         # 'te stats' - Show stats
+│   │   └── export.py        # 'te export' - Export data
 │   ├── core/                # Core functionality
 │   │   ├── __init__.py
 │   │   ├── vector_store.py  # zvec wrapper
@@ -53,7 +53,7 @@ python-dotenv>=1.0.0
 
 ```toml
 [project]
-name = "replay"
+name = "town-elder"
 version = "0.1.0"
 description = "Local-first semantic memory CLI for AI coding agents"
 readme = "README.md"
@@ -91,7 +91,7 @@ dev = [
 ]
 
 [project.scripts]
-replay = "replay.cli:app"
+te = "town_elder.cli:app"
 
 [build-system]
 requires = ["setuptools>=68.0.0", "wheel"]
@@ -111,17 +111,17 @@ disallow_untyped_defs = false
 
 ## CLI Entry Point
 
-### /Users/bylin/Code/replay/replay/cli.py
+### /Users/bylin/Code/town_elder/src/town_elder/cli.py
 
 ```python
-"""replay CLI - Main entry point."""
+"""te CLI - Main entry point."""
 import typer
 from rich.console import Console
 
-from replay.commands import init, index, search, add, stats, export
+from town_elder.commands import init, index, search, add, stats, export
 
 app = typer.Typer(
-    name="replay",
+    name="te",
     help="Local-first semantic memory CLI for AI coding agents",
     add_completion=False,
 )
@@ -138,9 +138,9 @@ app.add_typer(export.app, name="export")
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
-    """replay - Semantic memory for AI agents."""
+    """te - Semantic memory for AI agents."""
     if ctx.invoked_subcommand is None:
-        console.print("[bold]replay[/bold] - Semantic memory CLI")
+        console.print("[bold]te[/bold] - Semantic memory CLI")
         console.print("Use --help for usage information")
 
 
@@ -150,7 +150,7 @@ if __name__ == "__main__":
 
 ## Module Design
 
-### Core Vector Store (/Users/bylin/Code/replay/replay/core/vector_store.py)
+### Core Vector Store (/Users/bylin/Code/town_elder/src/town_elder/core/vector_store.py)
 
 ```python
 """zvec wrapper for vector storage."""
@@ -181,7 +181,7 @@ class ZvecStore:
     def _init_collection(self):
         """Initialize or open existing zvec collection."""
         schema = zvec.CollectionSchema(
-            name="replay_store",
+            name="te_store",
             vectors=zvec.VectorSchema(
                 name="embedding",
                 data_type=zvec.DataType.VECTOR_FP32,
@@ -206,7 +206,7 @@ class ZvecStore:
         pass
 ```
 
-### Embedder (/Users/bylin/Code/replay/replay/core/embedder.py)
+### Embedder (/Users/bylin/Code/town_elder/src/town_elder/core/embedder.py)
 
 ```python
 """fastembed wrapper for text embeddings."""
@@ -246,7 +246,7 @@ class Embedder:
         return 384  # bge-small-en-v1.5
 ```
 
-### Configuration (/Users/bylin/Code/replay/replay/core/config.py)
+### Configuration (/Users/bylin/Code/town_elder/src/town_elder/core/config.py)
 
 ```python
 """Configuration management."""
@@ -256,19 +256,19 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class ReplayConfig(BaseSettings):
-    """Configuration for replay CLI."""
+class TeConfig(BaseSettings):
+    """Configuration for te CLI."""
 
     model_config = SettingsConfigDict(
-        env_prefix="REPLAY_",
+        env_prefix="TE_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
     # Database settings
-    data_dir: Path = Field(default_factory=lambda: Path.home() / ".replay")
-    db_name: str = "replay.db"
+    data_dir: Path = Field(default_factory=lambda: Path.home() / ".te")
+    db_name: str = "te.db"
 
     # Embedding settings
     embed_model: str = "BAAI/bge-small-en-v1.5"
@@ -282,12 +282,12 @@ class ReplayConfig(BaseSettings):
 
 
 @lru_cache
-def get_config() -> ReplayConfig:
+def get_config() -> TeConfig:
     """Get cached configuration instance."""
-    return ReplayConfig()
+    return TeConfig()
 ```
 
-### Document Model (/Users/bylin/Code/replay/replay/models/document.py)
+### Document Model (/Users/bylin/Code/town_elder/src/town_elder/models/document.py)
 
 ```python
 """Document data model."""
@@ -315,7 +315,7 @@ class Document(BaseModel):
 ### Init Command
 
 ```python
-"""Initialize replay database."""
+"""Initialize te database."""
 import typer
 from rich.console import Console
 
@@ -328,8 +328,8 @@ def init(
     path: str = typer.Option(".", help="Directory to initialize"),
     force: bool = typer.Option(False, "--force", help="Overwrite existing"),
 ) -> None:
-    """Initialize a replay database in the specified directory."""
-    console.print(f"[green]Initialized replay database at {path}[/green]")
+    """Initialize a te database in the specified directory."""
+    console.print(f"[green]Initialized te database at {path}[/green]")
 ```
 
 ### Search Command
@@ -358,29 +358,29 @@ def search(
 ### Error Types
 
 ```python
-"""Error types for replay."""
+"""Error types for te."""
 from typing import Any
 
 
-class ReplayError(Exception):
-    """Base exception for replay."""
+class TeError(Exception):
+    """Base exception for te."""
 
     pass
 
 
-class DatabaseError(ReplayError):
+class DatabaseError(TeError):
     """Database-related errors."""
 
     pass
 
 
-class EmbeddingError(ReplayError):
+class EmbeddingError(TeError):
     """Embedding generation errors."""
 
     pass
 
 
-class ConfigError(ReplayError):
+class ConfigError(TeError):
     """Configuration errors."""
 
     pass
@@ -389,7 +389,7 @@ class ConfigError(ReplayError):
 ### Error Handling Strategy
 
 1. **Use typer's exception handling** - Let typer handle CLI-level errors gracefully
-2. **Wrap database operations** - Catch zvec errors and convert to ReplayError
+2. **Wrap database operations** - Catch zvec errors and convert to TeError
 3. **Validation with Pydantic** - Use pydantic for input validation
 4. **Rich error messages** - Use rich for formatted error output
 5. **Exit codes** - Return appropriate exit codes (0 success, 1 error)
@@ -424,8 +424,8 @@ def search(
 
 ### Key Configuration Points
 
-1. **Package name**: `replay`
-2. **Entry point**: `replay = "replay.cli:app"`
+1. **Package name**: `town-elder`
+2. **Entry point**: `te = "town_elder.cli:app"`
 3. **Python version**: >=3.10
 4. **Dependencies**: As specified above
 5. **Build system**: setuptools with wheel
