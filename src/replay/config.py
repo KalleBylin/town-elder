@@ -5,17 +5,31 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from replay.exceptions import ConfigError
+
 
 def _get_default_data_dir() -> Path:
     """Get the default data directory.
 
-    First checks for .replay in current directory, then falls back to home.
+    Only returns a path if .replay exists in the current working directory.
+    Raises ConfigError if no local .replay directory is found.
+
+    Users must explicitly configure data_dir via:
+    - REPLAY_DATA_DIR environment variable
+    - --data-dir CLI option
+    - Passing data_dir to get_config()
     """
     cwd = Path.cwd()
     cwd_replay = cwd / ".replay"
     if cwd_replay.exists() and cwd_replay.is_dir():
         return cwd_replay
-    return Path.home() / ".replay"
+    raise ConfigError(
+        "No .replay directory found in current working directory. "
+        "Please either:\n"
+        "  1. Run 'replay init' to initialize a local .replay directory, or\n"
+        "  2. Set REPLAY_DATA_DIR environment variable, or\n"
+        "  3. Use --data-dir option"
+    )
 
 
 class ReplayConfig(BaseSettings):
