@@ -534,3 +534,303 @@ class TestExitCodes:
                 text=True,
             )
             assert result.returncode != 0
+
+
+class TestInitErrorHandling:
+    """Tests for init command error handling."""
+
+    def test_init_fails_for_nonexistent_path(self):
+        """te init should fail when path doesn't exist."""
+        result = subprocess.run(
+            ["uv", "run", "te", "init", "--path", "/nonexistent/path/12345"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "does not exist" in result.stderr or "does not exist" in result.stdout
+
+    def test_init_fails_for_file_not_directory(self, temp_git_repo: Path):
+        """te init should fail when path is a file, not a directory."""
+        file_path = temp_git_repo / "file.txt"
+        file_path.write_text("not a directory")
+
+        result = subprocess.run(
+            ["uv", "run", "te", "init", "--path", str(file_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "not a directory" in result.stderr or "not a directory" in result.stdout
+
+    def test_init_force_refuses_unsafe_data_dir(self, temp_git_repo: Path):
+        """te init --force should refuse unsafe data-dir paths."""
+        # First initialize with a safe path
+        safe_data_dir = temp_git_repo / ".town_elder"
+        subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(safe_data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+
+        # Now try to reinitialize with --force using /tmp as data-dir (should be rejected as unsafe)
+        # Note: --data-dir must come BEFORE the subcommand
+        unsafe_path = Path("/tmp/unsafe_town_elder_test_12345")
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(unsafe_path), "init", "--force", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        # Should fail with safety error (not just "already exists")
+        assert result.returncode != 0
+        output = result.stderr + result.stdout
+        assert "unsafe" in output.lower() or "safety" in output.lower() or "refusing" in output.lower()
+
+    def test_init_with_force_clears_data(self, temp_git_repo: Path):
+        """te init --force should clear existing data."""
+        data_dir = temp_git_repo / ".town_elder"
+
+        # First init
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Reinit with force
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--force", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Reinitialized" in result.stdout
+
+
+class TestIndexErrorHandling:
+    """Tests for index command error handling."""
+
+    def test_index_fails_when_not_initialized(self):
+        """te index should fail when not initialized."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "index", "."],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert "not initialized" in result.stderr.lower()
+
+    def test_index_fails_for_nonexistent_path(self, temp_git_repo: Path):
+        """te index should fail for nonexistent path."""
+        data_dir = temp_git_repo / ".town_elder"
+
+        subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "index", "/nonexistent/path"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "does not exist" in result.stderr or "does not exist" in result.stdout
+
+    def test_index_fails_for_file_path(self, temp_git_repo: Path):
+        """te index should fail when given a file path instead of directory."""
+        data_dir = temp_git_repo / ".town_elder"
+
+        subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+
+        file_path = temp_git_repo / "test.py"
+        file_path.write_text("print('hello')")
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "index", str(file_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "not a directory" in result.stderr or "not a directory" in result.stdout
+
+
+class TestCommitIndexErrorHandling:
+    """Tests for commit-index command error handling."""
+
+    def test_commit_index_fails_when_not_initialized(self):
+        """te commit-index should fail when not initialized."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "commit-index", "--repo", tmp],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert "not initialized" in result.stderr.lower()
+
+    def test_commit_index_fails_for_non_git_repo(self, temp_git_repo: Path):
+        """te commit-index should fail for non-git repository."""
+        # Remove .git directory
+        import shutil
+        shutil.rmtree(temp_git_repo / ".git")
+
+        data_dir = temp_git_repo / ".town_elder"
+
+        # Need to create the directory manually since there's no git
+        data_dir.mkdir()
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "commit-index", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "not a git repository" in result.stderr.lower() or "not a git repository" in result.stdout.lower()
+
+
+class TestExportErrorHandling:
+    """Tests for export command error handling."""
+
+    def test_export_fails_when_not_initialized(self):
+        """te export should fail when not initialized."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "export"],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert "not initialized" in result.stderr.lower()
+
+    def test_export_fails_with_invalid_format(self, temp_git_repo: Path):
+        """te export should fail with invalid format."""
+        data_dir = temp_git_repo / ".town_elder"
+
+        subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "export", "--format", "invalid_format"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "invalid" in result.stderr.lower() or "invalid" in result.stdout.lower()
+
+
+class TestSearchErrorHandling:
+    """Tests for search/query command error handling."""
+
+    def test_search_fails_when_not_initialized(self):
+        """te search should fail when not initialized."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "search", "test"],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert "not initialized" in result.stderr.lower()
+
+    def test_query_fails_when_not_initialized(self):
+        """te query should fail when not initialized."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "query", "test"],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert "not initialized" in result.stderr.lower()
+
+
+class TestHookStatus:
+    """Tests for hook status command."""
+
+    def test_hook_status_not_installed(self, temp_git_repo: Path):
+        """te hook status should show not installed when no hook exists."""
+        result = subprocess.run(
+            ["uv", "run", "te", "hook", "status", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "not installed" in result.stdout.lower() or "not installed" in result.stderr.lower()
+
+    def test_hook_status_installed(self, temp_git_repo: Path):
+        """te hook status should show installed when hook exists."""
+        data_dir = temp_git_repo / ".town_elder"
+
+        # Initialize and install hook with explicit data-dir
+        subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "hook", "install", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "hook", "status", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "installed" in result.stdout.lower()
+
+    def test_hook_status_fails_for_non_git_repo(self):
+        """te hook status should fail for non-git repository."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["uv", "run", "te", "hook", "status", "--repo", tmp],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert "not a git repository" in result.stderr.lower() or "not a git repository" in result.stdout.lower()
+
+
+class TestAddErrorHandling:
+    """Tests for add command error handling."""
+
+    def test_add_fails_when_not_initialized(self):
+        """te add should fail when not initialized."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "add", "--text", "test"],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0
+            assert "not initialized" in result.stderr.lower()
+
+    def test_add_requires_text_option(self, temp_git_repo: Path):
+        """te add should require --text option."""
+        data_dir = temp_git_repo / ".town_elder"
+
+        subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(data_dir), "add"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
