@@ -859,6 +859,71 @@ class TestHookStatus:
             assert result.returncode != 0
             assert "not a git repository" in result.stderr.lower() or "not a git repository" in result.stdout.lower()
 
+    def test_hook_status_handles_non_utf8_hook(self, temp_git_repo: Path):
+        """te hook status should handle non-UTF8 hook files without crashing."""
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write binary content that is not valid UTF-8
+        hook_path.write_bytes(b"\x00\x01\x02\xff\xfe\xfd")
+
+        result = subprocess.run(
+            ["uv", "run", "te", "hook", "status", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Unknown" in result.stdout
+
+
+class TestHookNonUtf8:
+    """Tests for handling non-UTF8 hook files."""
+
+    def test_hook_install_handles_non_utf8_existing_hook(self, temp_git_repo: Path):
+        """te hook install should handle non-UTF8 existing hook without crashing."""
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write binary content that is not valid UTF-8
+        hook_path.write_bytes(b"\x00\x01\x02\xff\xfe\xfd")
+
+        result = subprocess.run(
+            ["uv", "run", "te", "hook", "install", "--repo", str(temp_git_repo), "--force"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "not a town elder hook" in result.stderr.lower() or "not a town elder hook" in result.stdout.lower()
+
+    def test_hook_uninstall_handles_non_utf8_hook(self, temp_git_repo: Path):
+        """te hook uninstall should handle non-UTF8 hook without crashing."""
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write binary content that is not valid UTF-8
+        hook_path.write_bytes(b"\x00\x01\x02\xff\xfe\xfd")
+
+        result = subprocess.run(
+            ["uv", "run", "te", "hook", "uninstall", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        # Should refuse to delete without --force
+        assert result.returncode == 1
+        assert "not a town elder hook" in result.stderr.lower()
+
+    def test_hook_uninstall_force_removes_non_utf8_hook(self, temp_git_repo: Path):
+        """te hook uninstall --force should remove non-UTF8 hook."""
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write binary content that is not valid UTF-8
+        hook_path.write_bytes(b"\x00\x01\x02\xff\xfe\xfd")
+
+        result = subprocess.run(
+            ["uv", "run", "te", "hook", "uninstall", "--repo", str(temp_git_repo), "--force"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert not hook_path.exists()
+
 
 class TestAddErrorHandling:
     """Tests for add command error handling."""

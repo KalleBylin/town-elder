@@ -1013,8 +1013,8 @@ def hook_status(
     console.print("[bold]Hook status:[/bold] Installed")
     console.print(f"Hook path: {hook_path}")
 
-    content = hook_path.read_text()
-    if _is_te_hook(content):
+    content = _safe_read_hook(hook_path)
+    if content is not None and _is_te_hook(content):
         console.print("Hook type: Town Elder (automatic indexing)")
     else:
         console.print("Hook type: Unknown (not a Town Elder hook)")
