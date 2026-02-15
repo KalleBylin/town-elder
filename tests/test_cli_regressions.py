@@ -662,3 +662,66 @@ class TestConfigErrorHandling:
         assert result.returncode != 0
         # Should mention --data-dir as an option (guidance goes to stdout)
         assert "--data-dir" in result.stdout
+
+
+def test_get_config_no_cache_leakage_across_cwd_changes(tmp_path):
+    """get_config should not return stale cached config when cwd changes.
+
+    Regression test for: te-j50
+    When data_dir is not provided, get_config() resolves the default from cwd.
+    The cache should not return stale values when cwd changes between calls.
+    """
+    import os
+    from pathlib import Path
+
+    from town_elder.config import get_config
+
+    # Create three separate directories with .town_elder subdirs
+    dir_a = tmp_path / "dir_a"
+    dir_b = tmp_path / "dir_b"
+    dir_c = tmp_path / "dir_c"
+
+    dir_a.mkdir()
+    dir_b.mkdir()
+    dir_c.mkdir()
+
+    # Create .town_elder in each directory
+    (dir_a / ".town_elder").mkdir()
+    (dir_b / ".town_elder").mkdir()
+    (dir_c / ".town_elder").mkdir()
+
+    original_cwd = Path.cwd()
+
+    try:
+        # Test 1: Change to dir_a and get config (no explicit data_dir)
+        os.chdir(dir_a)
+        config_a = get_config()
+        assert config_a.data_dir == dir_a / ".town_elder", (
+            f"Expected {dir_a / '.town_elder'}, got {config_a.data_dir}"
+        )
+
+        # Test 2: Change to dir_b and get config (should NOT return cached config_a)
+        os.chdir(dir_b)
+        config_b = get_config()
+        assert config_b.data_dir == dir_b / ".town_elder", (
+            f"Expected {dir_b / '.town_elder'}, got {config_b.data_dir}. "
+            "Cache returned stale config from previous cwd!"
+        )
+
+        # Test 3: Change to dir_c and get config (should NOT return cached config_a or config_b)
+        os.chdir(dir_c)
+        config_c = get_config()
+        assert config_c.data_dir == dir_c / ".town_elder", (
+            f"Expected {dir_c / '.town_elder'}, got {config_c.data_dir}. "
+            "Cache returned stale config from previous cwd!"
+        )
+
+        # Test 4: Go back to dir_a to verify it still returns correct value
+        os.chdir(dir_a)
+        config_a2 = get_config()
+        assert config_a2.data_dir == dir_a / ".town_elder", (
+            f"Expected {dir_a / '.town_elder'}, got {config_a2.data_dir}. "
+            "Cache returned stale config!"
+        )
+    finally:
+        os.chdir(original_cwd)

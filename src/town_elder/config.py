@@ -58,14 +58,27 @@ class TownElderConfig(BaseSettings):
 
 
 @lru_cache
+def _get_config_cached(data_dir: Path) -> TownElderConfig:
+    """Cached configuration lookup for explicit data_dir values."""
+    return TownElderConfig(data_dir=data_dir)
+
+
 def get_config(data_dir: str | Path | None = None, clear_cache: bool = False) -> TownElderConfig:
-    """Get cached configuration instance.
+    """Get configuration instance.
 
     Args:
         data_dir: Optional data directory to use. If provided, overrides default.
         clear_cache: If True, clear the cache before returning config.
+
+    Note: When data_dir is None, caching is disabled because the default
+    resolution depends on the current working directory, which can change
+    between invocations within the same process.
     """
     if clear_cache:
-        get_config.cache_clear()
+        _get_config_cached.cache_clear()
 
-    return TownElderConfig(data_dir=Path(data_dir)) if data_dir else TownElderConfig()
+    # Don't cache when data_dir is None since default depends on cwd
+    if data_dir is None:
+        return TownElderConfig()
+
+    return _get_config_cached(Path(data_dir))
