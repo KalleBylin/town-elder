@@ -129,13 +129,10 @@ def _escape_rich(text: str) -> str:
     return text.replace("[", "\\[").replace("]", "\\]")
 
 
-def _run_search(  # noqa: PLR0913
+def _run_search(
     ctx: typer.Context,
     query: str,
     top_k: int,
-    author: str | None,
-    path: str | None,
-    since: str | None,
 ) -> None:
     """Shared implementation for search-style commands."""
     from town_elder.exceptions import ConfigError
@@ -372,7 +369,7 @@ python -m town_elder --data-dir "{data_dir}" commit-index --repo "$(git rev-pars
 
 
 @app.command()
-def search(  # noqa: PLR0912, PLR0913
+def search(
     ctx: typer.Context,
     query: str = typer.Argument(..., help="Search query text"),
     top_k: int = typer.Option(
@@ -380,32 +377,17 @@ def search(  # noqa: PLR0912, PLR0913
         "--top-k",
         "-k",
         help="Number of results to return (default: 5)",
-    ),
-    author: str | None = typer.Option(
-        None,
-        "--author",
-        help="Filter results by author (not yet implemented)",
-    ),
-    path: str | None = typer.Option(
-        None,
-        "--path",
-        help="Filter results by file path (not yet implemented)",
-    ),
-    since: str | None = typer.Option(
-        None,
-        "--since",
-        help="Filter results by date (not yet implemented)",
     ),
 ) -> None:
     """Search for similar documents in the vector store.
 
     Embeds the query text and finds the most similar documents.
     """
-    _run_search(ctx, query=query, top_k=top_k, author=author, path=path, since=since)
+    _run_search(ctx, query=query, top_k=top_k)
 
 
 @app.command("query")
-def query(  # noqa: PLR0912, PLR0913
+def query(
     ctx: typer.Context,
     query: str = typer.Argument(..., help="Search query text"),
     top_k: int = typer.Option(
@@ -414,27 +396,12 @@ def query(  # noqa: PLR0912, PLR0913
         "-k",
         help="Number of results to return (default: 5)",
     ),
-    author: str | None = typer.Option(
-        None,
-        "--author",
-        help="Filter results by author (not yet implemented)",
-    ),
-    path: str | None = typer.Option(
-        None,
-        "--path",
-        help="Filter results by file path (not yet implemented)",
-    ),
-    since: str | None = typer.Option(
-        None,
-        "--since",
-        help="Filter results by date (not yet implemented)",
-    ),
 ) -> None:
     """Query for similar documents in the vector store.
 
     Alias for 'search' command. Embeds the query text and finds the most similar documents.
     """
-    _run_search(ctx, query=query, top_k=top_k, author=author, path=path, since=since)
+    _run_search(ctx, query=query, top_k=top_k)
 
 
 @app.command()

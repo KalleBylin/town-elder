@@ -20,17 +20,14 @@ _TEST_COMMITS_RETRY_COUNT = 49
 
 def test_query_alias_executes_via_shared_helper(monkeypatch):
     """`te query` should dispatch through the shared search helper."""
-    calls: list[tuple[str, int, str | None, str | None, str | None]] = []
+    calls: list[tuple[str, int]] = []
 
-    def fake_run_search(  # noqa: PLR0913
+    def fake_run_search(
         ctx,
         query: str,
         top_k: int,
-        author: str | None,
-        path: str | None,
-        since: str | None,
     ) -> None:
-        calls.append((query, top_k, author, path, since))
+        calls.append((query, top_k))
 
     monkeypatch.setattr(cli, "_run_search", fake_run_search)
 
@@ -38,7 +35,7 @@ def test_query_alias_executes_via_shared_helper(monkeypatch):
 
     assert result.exit_code == 0
     assert "AttributeError" not in result.output
-    assert calls == [("needle", 3, None, None, None)]
+    assert calls == [("needle", 3)]
 
 
 def test_status_alias_executes_via_shared_helper(monkeypatch):
