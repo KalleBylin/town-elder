@@ -83,6 +83,19 @@ def _is_te_hook(content: str) -> bool:
     return any(re.search(pattern, content) for pattern in patterns)
 
 
+def _safe_read_hook(hook_path: Path) -> str | None:
+    """Safely read hook file content, handling non-UTF8 files gracefully.
+
+    Returns:
+        The hook content as a string, or None if the file cannot be read as UTF-8
+        or does not exist.
+    """
+    try:
+        return hook_path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return None
+
+
 def set_data_dir(path: Path | str | None) -> None:
     """Set the global data directory.
 
@@ -908,8 +921,8 @@ def install(
 
     # Check if it's a Town Elder hook (ours or someone else's)
     if hook_path.exists() and force:
-        existing_content = hook_path.read_text()
-        if not _is_te_hook(existing_content):
+        existing_content = _safe_read_hook(hook_path)
+        if existing_content is None or not _is_te_hook(existing_content):
             error_console.print("[yellow]Warning: Existing hook is not a Town Elder hook[/yellow]")
             console.print("Use --force to overwrite anyway")
 
@@ -963,8 +976,8 @@ def uninstall(
         return
 
     # Check if it's a Town Elder hook
-    content = hook_path.read_text()
-    is_te_hook = _is_te_hook(content)
+    content = _safe_read_hook(hook_path)
+    is_te_hook = content is not None and _is_te_hook(content)
 
     if not is_te_hook and not force:
         error_console.print("[red]Error: Hook exists but is not a Town Elder hook[/red]")
