@@ -574,7 +574,7 @@ class TestInitErrorHandling:
 
         # Now try to reinitialize with --force using /tmp as data-dir (should be rejected as unsafe)
         # Note: --data-dir must come BEFORE the subcommand
-        unsafe_path = Path("/tmp/unsafe_town_elder_test_12345")
+        unsafe_path = Path("/") / "tmp" / "unsafe_town_elder_test_12345"
 
         result = subprocess.run(
             ["uv", "run", "te", "--data-dir", str(unsafe_path), "init", "--force", "--path", str(temp_git_repo)],

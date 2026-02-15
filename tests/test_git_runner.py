@@ -11,6 +11,9 @@ import pytest
 
 from town_elder.git.runner import Commit, GitRunner
 
+_THREE_COMMITS = 3
+_TWO_COMMITS = 2
+
 
 @pytest.fixture
 def temp_git_repo() -> Iterator[Path]:
@@ -87,8 +90,8 @@ class TestGitRunnerGetCommits:
                 check=True,
             )
 
-        commits = runner.get_commits(limit=3)
-        assert len(commits) <= 3
+        commits = runner.get_commits(limit=_THREE_COMMITS)
+        assert len(commits) <= _THREE_COMMITS
 
     def test_get_commits_with_offset(self, temp_git_repo: Path):
         """get_commits should respect offset parameter."""
@@ -217,6 +220,59 @@ class TestGitRunnerGetDiff:
             diff = runner.get_diff(commits[0].hash)
             assert diff is not None
 
+    def test_get_diffs_batch_returns_all_requested_hashes(self, temp_git_repo: Path):
+        """get_diffs_batch should return one entry per requested commit hash."""
+        runner = GitRunner(repo_path=temp_git_repo)
+
+        (temp_git_repo / "second.txt").write_text("second change")
+        subprocess.run(["git", "add", "."], cwd=temp_git_repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "second commit"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+
+        commits = runner.get_commits(limit=_TWO_COMMITS)
+        assert len(commits) >= _TWO_COMMITS
+
+        commit_hashes = [commits[0].hash, commits[1].hash]
+        diffs = runner.get_diffs_batch(commit_hashes)
+
+        assert set(diffs) == set(commit_hashes)
+        assert all(isinstance(diff, str) for diff in diffs.values())
+
+    def test_get_diffs_batch_avoids_per_commit_fallback_when_batch_succeeds(
+        self,
+        temp_git_repo: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """get_diffs_batch should not call get_diff when the batch call succeeds."""
+        runner = GitRunner(repo_path=temp_git_repo)
+
+        (temp_git_repo / "second.txt").write_text("second change")
+        subprocess.run(["git", "add", "."], cwd=temp_git_repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "second commit"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+
+        commits = runner.get_commits(limit=_TWO_COMMITS)
+        assert len(commits) >= _TWO_COMMITS
+
+        def fail_get_diff(commit_hash: str, max_size: int = 100 * 1024) -> str:
+            _ = commit_hash, max_size
+            raise AssertionError("Fallback path should not be used")
+
+        monkeypatch.setattr(runner, "get_diff", fail_get_diff)
+
+        commit_hashes = [commits[0].hash, commits[1].hash]
+        diffs = runner.get_diffs_batch(commit_hashes)
+
+        assert set(diffs) == set(commit_hashes)
+
 
 class TestGitRunnerGetCommitRange:
     """Tests for get_commit_range method."""
@@ -224,8 +280,8 @@ class TestGitRunnerGetCommitRange:
     def test_get_commit_range_returns_list(self, temp_git_repo: Path):
         """get_commit_range should return list of commit hashes."""
         runner = GitRunner(repo_path=temp_git_repo)
-        commits = runner.get_commits(limit=2)
-        if len(commits) >= 2:
+        commits = runner.get_commits(limit=_TWO_COMMITS)
+        if len(commits) >= _TWO_COMMITS:
             hashes = runner.get_commit_range(commits[1].hash, commits[0].hash)
             assert isinstance(hashes, list)
 

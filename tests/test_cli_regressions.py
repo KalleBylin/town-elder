@@ -18,6 +18,9 @@ runner = CliRunner()
 _TEST_COMMITS_LARGE = 150  # More than default limit to test backlog handling
 _TEST_COMMITS_MEDIUM = 50
 _TEST_COMMITS_RETRY_COUNT = 49
+_TEST_LIMIT = 10
+_HASH_LENGTH = 40
+_HEX_CHARS = set("0123456789abcdef")
 
 
 def _get_repo_id(repo_path: Path) -> str:
@@ -86,11 +89,20 @@ class _FakeGitRunner:
     def __init__(self, commits: list[Commit]):
         self._commits = commits
 
-    def get_commits(self, since: str | None = None, limit: int = 100, offset: int = 0) -> list[Commit]:
+    def get_commits(self, since: str | None = None, limit: int = 100, offset: int = 0, include_files: bool = False) -> list[Commit]:
+        _ = since, include_files
+        return self._commits[offset:offset + limit]
+
+    def get_commits_with_files_batch(self, since: str | None = None, limit: int = 100, offset: int = 0) -> list[Commit]:
         _ = since
         return self._commits[offset:offset + limit]
 
-    def get_diff(self, commit_hash: str) -> str:
+    def get_diffs_batch(self, commit_hashes: list[str], max_size: int = 100 * 1024) -> dict[str, str]:
+        _ = max_size
+        return {h: f"diff for {h}" for h in commit_hashes}
+
+    def get_diff(self, commit_hash: str, max_size: int = 100 * 1024) -> str:
+        _ = max_size
         return f"diff for {commit_hash}"
 
 
@@ -185,6 +197,69 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
 
     assert _get_last_indexed_commit(state_file, repo_path) == "c3"
     assert "c2" in controller.indexed_hashes
+
+
+def test_commit_index_respects_limit_without_all(monkeypatch, tmp_path):
+    """Default behavior should honor --limit when --all is not set."""
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+
+    commits = [_commit(f"c{i}") for i in range(30, 0, -1)]
+    controller = _StoreController(fail_hashes=set())
+    factory = _FakeFactory(git_runner=_FakeGitRunner(commits), controller=controller)
+    config = SimpleNamespace(data_dir=data_dir, embed_model="test-model")
+
+    def fake_get_config(data_dir=None):
+        _ = data_dir
+        return config
+
+    def fake_get_service_factory(data_dir=None):
+        _ = data_dir
+        return factory
+
+    monkeypatch.setattr(cli, "get_config", fake_get_config)
+    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+
+    result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", str(_TEST_LIMIT)])
+    assert result.exit_code == 0
+    assert len(controller.indexed_hashes) == _TEST_LIMIT
+
+
+def test_commit_index_advances_state_when_sentinel_found_after_pagination(monkeypatch, tmp_path):
+    """State should advance when sentinel is found in a later pagination batch."""
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+    state_file = data_dir / "index_state.json"
+    state_file.write_text(json.dumps({"last_indexed_commit": "c1"}))
+
+    total_commits = 220
+    commits = [_commit(f"c{i}") for i in range(total_commits, 0, -1)]
+    controller = _StoreController(fail_hashes=set())
+    factory = _FakeFactory(git_runner=_FakeGitRunner(commits), controller=controller)
+    config = SimpleNamespace(data_dir=data_dir, embed_model="test-model")
+
+    def fake_get_config(data_dir=None):
+        _ = data_dir
+        return config
+
+    def fake_get_service_factory(data_dir=None):
+        _ = data_dir
+        return factory
+
+    monkeypatch.setattr(cli, "get_config", fake_get_config)
+    monkeypatch.setattr(cli, "get_service_factory", fake_get_service_factory)
+
+    result = runner.invoke(
+        cli.app,
+        ["commit-index", "--repo", str(repo_path), "--limit", "100", "--batch-size", "50"],
+    )
+    assert result.exit_code == 0
+    assert _get_last_indexed_commit(state_file, repo_path) == f"c{total_commits}"
+    assert len(controller.indexed_hashes) == total_commits - 1
 
 
 # Tests for hook generation and detection
@@ -534,7 +609,6 @@ class TestHookExecution:
         This is a true integration test that verifies actual hook-triggered
         side effects (index state file creation) rather than mocking.
         """
-        import os
         import subprocess
 
         # Create a git repo
@@ -621,8 +695,8 @@ class TestHookExecution:
             assert commit_hash, "last_indexed_commit is empty"
 
             # 3. Verify the commit hash is valid (40 char hex for SHA)
-            assert len(commit_hash) == 40, f"Invalid commit hash length: {len(commit_hash)}"
-            assert all(c in "0123456789abcdef" for c in commit_hash), f"Invalid commit hash: {commit_hash}"
+            assert len(commit_hash) == _HASH_LENGTH, f"Invalid commit hash length: {len(commit_hash)}"
+            assert all(c in _HEX_CHARS for c in commit_hash), f"Invalid commit hash: {commit_hash}"
 
             # Verify the commit actually exists in the repo
             result = subprocess.run(
@@ -732,13 +806,12 @@ class TestConfigErrorHandling:
         # Get project directory dynamically (tests are in <project>/tests/)
         project_dir = Path(__file__).parent.parent
 
-        result = subprocess.run(
+        return subprocess.run(
             ["uv", "run", "--project", str(project_dir), "te", *args],
             cwd=tmp_path,
             capture_output=True,
             text=True,
         )
-        return result
 
     def test_stats_shows_friendly_error_when_not_initialized(self, tmp_path):
         """te stats should show friendly error, not traceback, when not initialized."""

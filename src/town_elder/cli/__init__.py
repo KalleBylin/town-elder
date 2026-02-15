@@ -7,6 +7,14 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 from town_elder.config import get_config
 from town_elder.services import get_service_factory
@@ -707,7 +715,7 @@ def index(  # noqa: PLR0912
 
 
 @app.command()
-def commit_index(  # noqa: PLR0912
+def commit_index(  # noqa: PLR0912, PLR0913
     ctx: typer.Context,
     path: str = typer.Option(
         ".",
@@ -719,7 +727,23 @@ def commit_index(  # noqa: PLR0912
         100,
         "--limit",
         "-n",
-        help="Number of commits to index (default: 100)",
+        help="Number of commits to index (default: 100, use --all for full history)",
+    ),
+    all_history: bool = typer.Option(
+        False,
+        "--all",
+        help="Index all commits in history (overrides --limit)",
+    ),
+    batch_size: int = typer.Option(
+        500,
+        "--batch-size",
+        "-b",
+        help="Number of commits to process per batch (default: 500)",
+    ),
+    max_diff_size: int = typer.Option(
+        100 * 1024,
+        "--max-diff-size",
+        help="Maximum diff size in bytes (default: 102400)",
     ),
     incremental: bool = typer.Option(
         True,
@@ -753,6 +777,16 @@ def commit_index(  # noqa: PLR0912
         console.print("[dim]Ensure the path contains a .git directory[/dim]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
+    if limit <= 0:
+        error_console.print("[red]Error: --limit must be greater than 0[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+    if batch_size <= 0:
+        error_console.print("[red]Error: --batch-size must be greater than 0[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+    if max_diff_size <= 0:
+        error_console.print("[red]Error: --max-diff-size must be greater than 0[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+
     # Load last indexed commit from state file (repo-scoped)
     state_file = config.data_dir / "index_state.json"
     last_indexed = None
@@ -770,21 +804,22 @@ def commit_index(  # noqa: PLR0912
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
-        # Get commits - in incremental mode, fetch enough to find last_indexed
-        all_commits = git.get_commits(limit=limit)
+        initial_limit = batch_size if all_history else limit
+        # Get commits using batch mode (with files in single call)
+        initial_commits = git.get_commits_with_files_batch(limit=initial_limit)
     except Exception as e:
         console.print(f"[red]Error fetching commits:[/red] {_escape_rich(str(e))}")
         store.close()
         raise typer.Exit(code=EXIT_ERROR)
 
     # Filter commits if using incremental mode
-    commits = all_commits
+    commits = initial_commits
     sentinel_found = True  # Assume found unless we determine otherwise
     if incremental and last_indexed and not force:
         # Find the position of last indexed commit
         found_last = False
         filtered = []
-        for commit in all_commits:
+        for commit in initial_commits:
             if commit.hash == last_indexed:
                 found_last = True
                 break
@@ -795,21 +830,22 @@ def commit_index(  # noqa: PLR0912
             # Sentinel not found - this is a stale/missing state situation
             sentinel_found = False
             # Continue fetching in batches until we find last_indexed or run out
-            offset = limit
+            offset = len(initial_commits)
             while not found_last:
-                more_commits = git.get_commits(limit=limit, offset=offset)
+                more_commits = git.get_commits_with_files_batch(limit=batch_size, offset=offset)
                 if not more_commits:
                     break
                 for commit in more_commits:
                     if commit.hash == last_indexed:
                         found_last = True
+                        sentinel_found = True
                         break
                     filtered.append(commit)
-                offset += limit
+                offset += len(more_commits)
                 if found_last:
                     break
                 # Check if we've reached the end
-                if len(more_commits) < limit:
+                if len(more_commits) < batch_size:
                     break
         # If we found the last indexed commit, only index newer ones
         if found_last:
@@ -824,6 +860,17 @@ def commit_index(  # noqa: PLR0912
             console.print("[yellow]Indexing all available commits without advancing state.[/yellow]")
             # Use filtered (contains all commits from all batches), not just first page
             commits = filtered
+    elif all_history:
+        # For --all mode, get all commits (may need multiple fetches)
+        offset = len(commits)
+        while True:
+            more_commits = git.get_commits_with_files_batch(limit=batch_size, offset=offset)
+            if not more_commits:
+                break
+            commits.extend(more_commits)
+            offset += len(more_commits)
+            if len(more_commits) < batch_size:
+                break
 
     # Reverse to index from oldest to newest
     commits = list(reversed(commits))
@@ -833,49 +880,81 @@ def commit_index(  # noqa: PLR0912
         store.close()
         return
 
-    console.print(f"[green]Indexing {len(commits)} commits...[/green]")
+    console.print(f"[green]Indexing {len(commits)} commits (batch size: {batch_size})...[/green]")
 
     indexed_count = 0
     skipped_count = 0
     frontier_commit_hash: str | None = None
     frontier_blocked = False
+
+    # Process commits in batches
     try:
-        for commit in commits:
-            try:
-                # Get the diff
-                diff = git.get_diff(commit.hash)
-                diff_text = diff_parser.parse_diff_to_text(diff)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("({task.completed}/{task.total})"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console
+        ) as progress:
+            task = progress.add_task("Indexing commits", total=len(commits))
 
-                # Combine with commit message
-                text = f"Commit: {commit.message}\n\n{diff_text}"
+            for batch_start in range(0, len(commits), batch_size):
+                batch_end = min(batch_start + batch_size, len(commits))
+                batch_commits = commits[batch_start:batch_end]
 
-                # Index
-                doc_id = f"commit_{commit.hash}"
-                vector = embedder.embed_single(text)
-                store.insert(
-                    doc_id, vector, text,
-                    {
-                        "type": "commit",
-                        "hash": commit.hash,
-                        "author": commit.author,
-                        "message": commit.message,
-                    }
-                )
-                indexed_count += 1
-                if not frontier_blocked:
-                    frontier_commit_hash = commit.hash
-            except Exception as e:
-                error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
-                skipped_count += 1
-                frontier_blocked = True
+                # Batch fetch diffs for all commits in this batch
+                commit_hashes = [c.hash for c in batch_commits]
+                diffs = git.get_diffs_batch(commit_hashes, max_size=max_diff_size)
+
+                for commit in batch_commits:
+                    try:
+                        # Get the diff from batch result
+                        diff = diffs.get(commit.hash, "")
+                        diff_text = diff_parser.parse_diff_to_text(diff)
+
+                        # Check if truncated
+                        if "[truncated" in diff:
+                            diff_text += " [diff was truncated due to size]"
+
+                        # Combine with commit message
+                        text = f"Commit: {commit.message}\n\n{diff_text}"
+
+                        # Index
+                        doc_id = f"commit_{commit.hash}"
+                        vector = embedder.embed_single(text)
+                        store.insert(
+                            doc_id, vector, text,
+                            {
+                                "type": "commit",
+                                "hash": commit.hash,
+                                "author": commit.author,
+                                "message": commit.message,
+                            }
+                        )
+                        indexed_count += 1
+                        if not frontier_blocked:
+                            frontier_commit_hash = commit.hash
+                        progress.advance(task)
+                    except Exception as e:
+                        error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                        skipped_count += 1
+                        frontier_blocked = True
+                        progress.advance(task)
+
+                # Save checkpoint after each batch (resumable)
+                if frontier_commit_hash and sentinel_found:
+                    _save_index_state(state_file, repo_path, frontier_commit_hash)
+
     except Exception as e:
         console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)
     finally:
         store.close()
 
-    # Save last indexed commit state only if sentinel was found.
-    # This prevents unsafe state advance when sentinel is missing/stale.
+    # Save final state
     if frontier_commit_hash and sentinel_found:
         _save_index_state(state_file, repo_path, frontier_commit_hash)
 
