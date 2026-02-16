@@ -323,7 +323,11 @@ def _save_index_state(state_file: Path, repo_path: Path, frontier_commit_hash: s
     """Save incremental index state, scoped by repository.
 
     Creates or updates the repo-scoped entry in the state file.
+    Uses atomic write (temp file + rename) to prevent corruption.
     """
+    import os
+    import tempfile
+
     # Load existing state (to preserve other repos' state)
     if state_file.exists():
         try:
@@ -353,7 +357,25 @@ def _save_index_state(state_file: Path, repo_path: Path, frontier_commit_hash: s
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    state_file.write_text(json.dumps(state))
+    # Atomic write: write to temp file, then rename
+    # os.replace is atomic on POSIX systems
+    state_json = json.dumps(state)
+    temp_fd, temp_path = tempfile.mkstemp(
+        dir=state_file.parent,
+        prefix=".index_state_",
+        suffix=".tmp"
+    )
+    try:
+        with os.fdopen(temp_fd, "w") as f:
+            f.write(state_json)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, state_file)
+    except Exception:
+        # Clean up temp file on failure
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
 
 
 def _is_safe_te_storage_path(data_dir: Path, init_path: Path) -> bool:
