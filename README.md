@@ -295,7 +295,7 @@ python -m town_elder commit-index ...
 | Hook not found | Install it: `te hook install` |
 | "command not found" errors | Ensure `uv`, `te`, or Python is on your PATH |
 | Hook runs but nothing happens | Ensure database is initialized: `te init` first |
-| uv not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`, or use `--no-uv` flag and ensure `te` is installed |
+| uv not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`, or ensure `te` is on your PATH |
 
 **Verifying hook installation:**
 ```bash
