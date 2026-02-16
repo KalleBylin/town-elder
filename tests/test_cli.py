@@ -106,6 +106,116 @@ class TestHookInstall:
         assert hook_path.stat().st_mode & 0o111  # executable
 
 
+class TestHookLauncherPortability:
+    """Tests for hook launcher portability (uv absent, te/python fallback)."""
+
+    def test_hook_install_includes_fallback_chain(self, temp_git_repo: Path):
+        """Hook install should generate fallback chain: uv -> te -> python -m town_elder."""
+        # Initialize with default location
+        result = subprocess.run(
+            ["uv", "run", "te", "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Install hook
+        result = subprocess.run(
+            ["uv", "run", "te", "hook", "install", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Verify the hook contains the fallback chain
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        hook_content = hook_path.read_text()
+
+        # Check for uv run te
+        assert "uv run te" in hook_content
+        # Check for te fallback
+        assert "command -v te >/dev/null 2>&1 && te" in hook_content
+        # Check for python -m town_elder fallback
+        assert "python -m town_elder" in hook_content
+
+    def test_hook_install_fallback_chain_with_data_dir(self, temp_git_repo: Path):
+        """Hook install should include fallback chain even with custom data-dir."""
+        custom_data_dir = temp_git_repo / ".custom-town-elder"
+
+        # Initialize with custom data-dir
+        result = subprocess.run(
+            [
+                "uv", "run", "te",
+                "--data-dir", str(custom_data_dir),
+                "init",
+                "--path", str(temp_git_repo),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Install hook with custom data-dir
+        result = subprocess.run(
+            [
+                "uv", "run", "te",
+                "--data-dir", str(custom_data_dir),
+                "hook", "install",
+                "--repo", str(temp_git_repo),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Verify the hook contains the fallback chain and data-dir
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        hook_content = hook_path.read_text()
+
+        # Check for fallback chain
+        assert "uv run te" in hook_content
+        assert "command -v te >/dev/null 2>&1 && te" in hook_content
+        assert "python -m town_elder" in hook_content
+        # Check for data-dir
+        assert "--data-dir" in hook_content
+
+    def test_hook_fallback_order_correct(self, temp_git_repo: Path):
+        """Hook should try uv first, then te, then python -m town_elder."""
+        # Initialize
+        result = subprocess.run(
+            ["uv", "run", "te", "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        # Install hook
+        result = subprocess.run(
+            ["uv", "run", "te", "hook", "install", "--repo", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+        hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
+        hook_content = hook_path.read_text()
+
+        # Find positions of each command in the hook (search for complete command lines)
+        # Use more specific patterns to avoid matching comments
+        uv_pos = hook_content.find("&& uv run te commit-index")
+        te_pos = hook_content.find("command -v te >/dev/null 2>&1 && te commit-index")
+        # For python, look for the full command since "python" also appears in comments
+        python_pos = hook_content.find("python -m town_elder commit-index")
+
+        # Verify all commands are present
+        assert uv_pos != -1, "uv run te not found in hook"
+        assert te_pos != -1, "te fallback not found in hook"
+        assert python_pos != -1, "python -m town_elder fallback not found in hook"
+
+        # Verify order: uv -> te -> python -m
+        assert uv_pos < te_pos < python_pos, "Fallback order should be: uv -> te -> python -m"
+
+
 class TestHookUninstall:
     """Tests for hook uninstall safety."""
 
