@@ -1192,14 +1192,14 @@ def install(
         console.print(f"[dim]{e}[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
-    # Determine the data_dir to use in the hook - use absolute path for reliability
+    # Determine the data_dir to use in the hook - use resolved config.data_dir
     # Use a fallback chain: uv run te -> uvx --from town-elder te -> te -> python -m town_elder
     # This ensures the hook works even if uv is not installed
     # Shell-escape the data_dir to prevent injection
-    if data_dir:
-        escaped_data_dir = shlex.quote(str(config.data_dir.resolve()))
-        data_dir_arg = f'--data-dir {escaped_data_dir}'
-        hook_content = f"""#!/bin/sh
+    # Always include --data-dir to support env var configuration (TOWN_ELDER_DATA_DIR)
+    escaped_data_dir = shlex.quote(str(config.data_dir.resolve()))
+    data_dir_arg = f'--data-dir {escaped_data_dir}'
+    hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 # Try uv first, then uvx, then te, then python -m town_elder
 
@@ -1207,16 +1207,6 @@ command -v uv >/dev/null 2>&1 && uv run te {data_dir_arg} commit-index --repo "$
 command -v uvx >/dev/null 2>&1 && uvx --from town-elder te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
 command -v te >/dev/null 2>&1 && te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
 python -m town_elder {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
-"""
-    else:
-        hook_content = """#!/bin/sh
-# Town Elder post-commit hook - automatically indexes commits
-# Try uv first, then uvx, then te, then python -m town_elder
-
-command -v uv >/dev/null 2>&1 && uv run te commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-command -v uvx >/dev/null 2>&1 && uvx --from town-elder te commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-command -v te >/dev/null 2>&1 && te commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
 """
 
     hook_path.write_text(hook_content)
