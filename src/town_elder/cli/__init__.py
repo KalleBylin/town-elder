@@ -44,6 +44,7 @@ app = typer.Typer(
 
 # Global data directory option - DEPRECATED, use CLIContext instead
 _data_dir: Path | None = None
+GIT_ERROR_EXIT_CODE = 128
 
 
 def _get_git_dir(repo_path: Path) -> Path:
@@ -79,11 +80,9 @@ def _get_common_git_dir(repo_path: Path) -> Path:
 
     Uses 'git rev-parse --git-common-dir' to determine the correct path.
     """
-    import subprocess
-
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
+            ["/usr/bin/git", "rev-parse", "--git-common-dir"],
             cwd=repo_path,
             capture_output=True,
             text=True,
@@ -833,7 +832,7 @@ def commit_index(  # noqa: PLR0912, PLR0913
         # Check for empty repository (exit code 128 can mean no commits OR fatal error)
         # We must check the error message to distinguish between them
         error_msg = e.stderr.strip() if e.stderr else ""
-        if e.returncode == 128 and _is_empty_repo_error(error_msg):
+        if e.returncode == GIT_ERROR_EXIT_CODE and _is_empty_repo_error(error_msg):
             console.print("[yellow]No commits to index.[/yellow]")
             store.close()
             raise typer.Exit(code=0)

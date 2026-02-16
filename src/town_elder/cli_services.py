@@ -55,20 +55,14 @@ def _is_empty_repo_error(error_msg: str) -> bool:
         "could not read",
         "unable to read",
     ]
+    error_msg_lower = error_msg.lower()
 
     # Check for fatal errors first - if any match, it's not an empty repo
-    for pattern in fatal_error_patterns:
-        if pattern.lower() in error_msg.lower():
-            return False
+    if any(pattern.lower() in error_msg_lower for pattern in fatal_error_patterns):
+        return False
 
     # Check for empty repo patterns
-    for pattern in empty_repo_patterns:
-        if pattern.lower() in error_msg.lower():
-            return True
-
-    # If we can't determine, be conservative and treat as fatal error
-    # (don't mask as "no commits" if we're not sure)
-    return False
+    return any(pattern.lower() in error_msg_lower for pattern in empty_repo_patterns)
 
 
 class CLIContext:
