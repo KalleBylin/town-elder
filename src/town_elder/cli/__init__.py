@@ -42,6 +42,22 @@ app = typer.Typer(
 _data_dir: Path | None = None
 
 
+def _get_git_dir(repo_path: Path) -> Path:
+    """Get the .git directory path, handling worktrees where .git is a file.
+
+    In regular git repos, .git is a directory.
+    In git worktrees, .git is a file that points to the actual git directory.
+    """
+    git_path = repo_path / ".git"
+    if git_path.is_file():
+        # Worktree case: .git is a file containing "gitdir: /path/to/actual/git dir"
+        content = git_path.read_text()
+        if content.startswith("gitdir:"):
+            actual_git_dir = content.split(":", 1)[1].strip()
+            return Path(actual_git_dir)
+    return git_path
+
+
 def _is_te_hook(content: str) -> bool:
     """Check if hook content is a Town Elder commit-index hook.
 
@@ -414,7 +430,7 @@ def init(  # noqa: PLR0912
 
     # Optionally install hook
     if install_hook:
-        git_dir = init_path / ".git"
+        git_dir = _get_git_dir(init_path)
         if not git_dir.exists():
             console.print("[yellow]Warning: Not a git repository, skipping hook installation[/yellow]")
         else:
@@ -920,7 +936,7 @@ def install(
     import os
 
     repo_path = Path(path).resolve()
-    git_dir = repo_path / ".git"
+    git_dir = _get_git_dir(repo_path)
     hooks_dir = git_dir / "hooks"
     hook_path = hooks_dir / "post-commit"
 
@@ -996,7 +1012,8 @@ def uninstall(
 ) -> None:
     """Remove post-commit hook."""
     repo_path = Path(path).resolve()
-    hook_path = repo_path / ".git" / "hooks" / "post-commit"
+    git_dir = _get_git_dir(repo_path)
+    hook_path = git_dir / "hooks" / "post-commit"
 
     if not hook_path.exists():
         error_console.print(f"[yellow]No post-commit hook found at {hook_path}[/yellow]")
@@ -1024,7 +1041,7 @@ def hook_status(
 ) -> None:
     """Check if post-commit hook is installed."""
     repo_path = Path(path).resolve()
-    git_dir = repo_path / ".git"
+    git_dir = _get_git_dir(repo_path)
 
     if not git_dir.exists():
         console.print(f"[red]Not a git repository: {path}[/red]")
