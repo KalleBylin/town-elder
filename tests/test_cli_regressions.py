@@ -869,6 +869,35 @@ def test_data_dir_not_leaked_across_invocations(tmp_path):
         assert data_dir_1.name not in result5.output
 
 
+class TestDataDirValidation:
+    """Tests for --data-dir validation at CLI entry."""
+
+    def test_data_dir_rejects_missing_path(self, tmp_path):
+        """CLI should fail early when --data-dir path does not exist."""
+        missing_data_dir = tmp_path / "missing-data-dir"
+
+        result = runner.invoke(
+            cli.app,
+            ["--data-dir", str(missing_data_dir), "stats"],
+        )
+
+        assert result.exit_code == 1
+        assert "--data-dir does not exist" in result.output
+
+    def test_data_dir_rejects_file_path(self, tmp_path):
+        """CLI should fail early when --data-dir points to a file."""
+        not_a_dir = tmp_path / "not-a-dir"
+        not_a_dir.write_text("file content")
+
+        result = runner.invoke(
+            cli.app,
+            ["--data-dir", str(not_a_dir), "stats"],
+        )
+
+        assert result.exit_code == 1
+        assert "--data-dir exists but is not a directory" in result.output
+
+
 class TestConfigErrorHandling:
     """Tests for friendly error messages when database is not initialized.
 
@@ -1041,10 +1070,12 @@ class TestTopKValidation:
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
         (repo_path / ".git").mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
 
         result = runner.invoke(
             cli.app,
-            ["--data-dir", str(tmp_path / "data"), "search", "test", "--top-k", "0"],
+            ["--data-dir", str(data_dir), "search", "test", "--top-k", "0"],
         )
 
         assert result.exit_code != 0
@@ -1055,10 +1086,12 @@ class TestTopKValidation:
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
         (repo_path / ".git").mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
 
         result = runner.invoke(
             cli.app,
-            ["--data-dir", str(tmp_path / "data"), "search", "test", "--top-k", "-1"],
+            ["--data-dir", str(data_dir), "search", "test", "--top-k", "-1"],
         )
 
         assert result.exit_code != 0
@@ -1069,10 +1102,12 @@ class TestTopKValidation:
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
         (repo_path / ".git").mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
 
         result = runner.invoke(
             cli.app,
-            ["--data-dir", str(tmp_path / "data"), "query", "test", "--top-k", "0"],
+            ["--data-dir", str(data_dir), "query", "test", "--top-k", "0"],
         )
 
         assert result.exit_code != 0
@@ -1083,10 +1118,12 @@ class TestTopKValidation:
         repo_path = tmp_path / "repo"
         repo_path.mkdir()
         (repo_path / ".git").mkdir()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
 
         result = runner.invoke(
             cli.app,
-            ["--data-dir", str(tmp_path / "data"), "query", "test", "--top-k", "-5"],
+            ["--data-dir", str(data_dir), "query", "test", "--top-k", "-5"],
         )
 
         assert result.exit_code != 0

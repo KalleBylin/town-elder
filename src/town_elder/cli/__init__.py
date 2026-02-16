@@ -221,6 +221,31 @@ def _get_data_dir_from_context(ctx: typer.Context) -> Path | None:
     return _data_dir
 
 
+def _validate_data_dir_option(data_dir: Path, invoked_subcommand: str | None) -> None:
+    """Validate explicit --data-dir before command execution."""
+    if data_dir.exists():
+        if data_dir.is_dir():
+            return
+        error_console.print(
+            "[red]Error: --data-dir exists but is not a directory:[/red] "
+            f"{_escape_rich(str(data_dir))}"
+        )
+        raise typer.Exit(code=EXIT_ERROR)
+
+    # Allow init to create a new data directory.
+    if invoked_subcommand == "init":
+        return
+
+    error_console.print(
+        "[red]Error: --data-dir does not exist:[/red] "
+        f"{_escape_rich(str(data_dir))}"
+    )
+    error_console.print(
+        "[dim]Use 'te --data-dir <path> init --path <repo>' to create it.[/dim]"
+    )
+    raise typer.Exit(code=EXIT_ERROR)
+
+
 def _get_repo_id(repo_path: Path) -> str:
     """Generate a deterministic ID for a repository based on its canonical path.
 
@@ -419,28 +444,32 @@ def main(
         console.print(f"te version {__version__}")
         raise typer.Exit(code=EXIT_SUCCESS)
 
-    # Validate data_dir if provided
+    resolved_data_dir: Path | None = None
     if data_dir:
-        data_dir_path = Path(data_dir)
-        try:
-            # Expand user path to catch invalid paths early
-            expanded = data_dir_path.expanduser()
-            # Resolve to get absolute path, catching invalid paths
-            expanded.resolve()
-        except (OSError, ValueError) as e:
-            error_console.print(f"[red]Error: Invalid --data-dir path:[/red] {_escape_rich(data_dir)}")
-            error_console.print(f"[dim]{e}[/dim]")
-            raise typer.Exit(code=EXIT_INVALID_ARG)
-
         # Check for null bytes (common path injection)
-        if '\0' in data_dir:
-            error_console.print(f"[red]Error: Invalid --data-dir path (contains null byte):[/red] {_escape_rich(data_dir)}")
-            raise typer.Exit(code=EXIT_INVALID_ARG)
+        if "\0" in data_dir:
+            error_console.print(
+                "[red]Error: Invalid --data-dir path (contains null byte):[/red] "
+                f"{_escape_rich(data_dir)}"
+            )
+            raise typer.Exit(code=EXIT_ERROR)
 
-        data_dir = expanded
+        try:
+            # Expand user path to catch invalid paths early.
+            resolved_data_dir = Path(data_dir).expanduser()
+            resolved_data_dir.resolve()
+        except (OSError, ValueError) as e:
+            error_console.print(
+                "[red]Error: Invalid --data-dir path:[/red] "
+                f"{_escape_rich(data_dir)}"
+            )
+            error_console.print(f"[dim]{e}[/dim]")
+            raise typer.Exit(code=EXIT_ERROR)
+
+        _validate_data_dir_option(resolved_data_dir, ctx.invoked_subcommand)
 
     # Use invocation-scoped context instead of global to prevent data-dir leakage
-    ctx.obj = CLIContext(data_dir=data_dir)
+    ctx.obj = CLIContext(data_dir=resolved_data_dir)
 
     if ctx.invoked_subcommand is None:
         console.print("[bold]Town Elder[/bold] - Semantic memory CLI")
