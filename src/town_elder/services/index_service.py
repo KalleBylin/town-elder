@@ -1,6 +1,7 @@
 """Index service for town_elder."""
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,9 @@ class IndexService:
         except OSError as e:
             raise IndexingError(f"Failed to read file {file_path}: {e}") from e
 
-        doc_id = str(file_path)
+        # zvec requires alphanumeric doc_ids, so we hash the path
+        file_path_str = str(file_path)
+        doc_id = hashlib.sha256(file_path_str.encode()).hexdigest()[:16]
         metadata = {
             "source": str(file_path),
             "type": file_path.suffix,

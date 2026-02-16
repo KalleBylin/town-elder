@@ -1,6 +1,7 @@
 """Tests for IndexService."""
 from __future__ import annotations
 
+import hashlib
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,7 +44,9 @@ class TestIndexService:
             service = IndexService(store=mock_store, embedder=mock_embedder)
             doc_id = service.index_file(test_file)
 
-        assert doc_id == str(test_file)
+        # zvec requires alphanumeric doc_ids, so doc_id should be a hash
+        expected_doc_id = hashlib.sha256(str(test_file).encode()).hexdigest()[:16]
+        assert doc_id == expected_doc_id
         mock_store.insert.assert_called_once()
         mock_embedder.embed_single.assert_called_once_with("print('hello')")
 
