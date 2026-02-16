@@ -108,23 +108,34 @@ class ZvecStore:
 
         return self._collection
 
+    @staticmethod
+    def _vector_to_list(vector: np.ndarray) -> list[float]:
+        return np.asarray(vector, dtype=np.float32).tolist()
+
+    @classmethod
+    def _build_doc(
+        cls,
+        zvec_module: Any,
+        doc_id: str,
+        vector: np.ndarray,
+        text: str,
+        metadata: dict[str, Any],
+    ) -> Any:
+        return zvec_module.Doc(
+            id=doc_id,
+            vectors={"embedding": cls._vector_to_list(vector)},
+            fields={
+                "text": text,
+                "metadata": json.dumps(metadata),
+            },
+        )
+
     def insert(self, doc_id: str, vector: np.ndarray, text: str, metadata: dict[str, Any]) -> str:
         """Insert a document with embedding."""
-        import json
-
         import zvec
 
         collection = self._get_collection()
-        collection.insert(
-            zvec.Doc(
-                id=doc_id,
-                vectors={"embedding": vector.tolist()},
-                fields={
-                    "text": text,
-                    "metadata": json.dumps(metadata),
-                },
-            )
-        )
+        collection.insert(self._build_doc(zvec, doc_id, vector, text, metadata))
         return doc_id
 
     def upsert(self, doc_id: str, vector: np.ndarray, text: str, metadata: dict[str, Any]) -> str:
@@ -133,11 +144,59 @@ class ZvecStore:
         This provides idempotent indexing: running the same upsert multiple times
         produces the same result without duplicating documents.
         """
-        # Use lock to ensure atomic delete+insert operation
+        import zvec
+
+        collection = self._get_collection()
+        if hasattr(collection, "upsert"):
+            collection.upsert(self._build_doc(zvec, doc_id, vector, text, metadata))
+            return doc_id
+
+        # Fallback path for older APIs without upsert support.
         with self._lock:
-            # Delete existing document if it exists, then insert new one
             self.delete(doc_id)
             return self.insert(doc_id, vector, text, metadata)
+
+    def bulk_insert(
+        self,
+        docs: list[tuple[str, np.ndarray, str, dict[str, Any]]],
+    ) -> list[str]:
+        """Insert multiple documents in one operation."""
+        if not docs:
+            return []
+
+        import zvec
+
+        collection = self._get_collection()
+        zvec_docs = [
+            self._build_doc(zvec, doc_id, vector, text, metadata)
+            for doc_id, vector, text, metadata in docs
+        ]
+        collection.insert(zvec_docs)
+        return [doc_id for doc_id, *_ in docs]
+
+    def bulk_upsert(
+        self,
+        docs: list[tuple[str, np.ndarray, str, dict[str, Any]]],
+    ) -> list[str]:
+        """Upsert multiple documents with a single backend call when possible."""
+        if not docs:
+            return []
+
+        import zvec
+
+        collection = self._get_collection()
+        zvec_docs = [
+            self._build_doc(zvec, doc_id, vector, text, metadata)
+            for doc_id, vector, text, metadata in docs
+        ]
+
+        if hasattr(collection, "upsert"):
+            collection.upsert(zvec_docs)
+            return [doc_id for doc_id, *_ in docs]
+
+        for doc_id, vector, text, metadata in docs:
+            self.upsert(doc_id, vector, text, metadata)
+        return [doc_id for doc_id, *_ in docs]
 
     def search(self, query_vector: np.ndarray, top_k: int = 5) -> list[dict[str, Any]]:
         """Search for similar documents using cosine similarity."""

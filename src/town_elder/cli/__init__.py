@@ -7,6 +7,7 @@ import hashlib
 import json
 import shlex
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,11 @@ from town_elder.cli_services import (
     require_initialized,
 )
 from town_elder.config import get_config as get_config
+from town_elder.indexing.batch_manager import (
+    BatchManager,
+    ChunkBatchItem,
+    ChunkBatchResult,
+)
 from town_elder.indexing.file_scanner import scan_files
 from town_elder.indexing.git_hash_scanner import (
     TrackedFile,
@@ -594,6 +600,212 @@ def _delete_file_docs(
                 store.delete(delete_doc_id)
 
 
+@dataclass
+class _FileIndexBatchState:
+    """Tracks file-level status while chunk writes are batched."""
+
+    file_path: Path
+    relative_path: str
+    blob_hash: str | None
+    previous_hash: str | None
+    previous_chunk_count: int
+    expected_chunks: int = 0
+    indexed_chunks: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+def _normalize_chunk_metadata(
+    *,
+    base_metadata: dict[str, Any],
+    chunk_metadata: dict[str, Any],
+    fallback_chunk_index: int,
+) -> tuple[dict[str, Any], int]:
+    metadata = dict(base_metadata)
+    metadata.update(chunk_metadata)
+
+    chunk_index_value = metadata.get("chunk_index")
+    if (
+        isinstance(chunk_index_value, bool)
+        or not isinstance(chunk_index_value, int)
+        or chunk_index_value < 0
+    ):
+        chunk_index = fallback_chunk_index
+        metadata["chunk_index"] = chunk_index
+    else:
+        chunk_index = chunk_index_value
+
+    return metadata, chunk_index
+
+
+def _upsert_single_chunk(
+    store: Any,
+    *,
+    doc_id: str,
+    vector: Any,
+    text: str,
+    metadata: dict[str, Any],
+) -> None:
+    if hasattr(store, "upsert"):
+        store.upsert(doc_id, vector, text, metadata)
+        return
+    if hasattr(store, "bulk_upsert"):
+        store.bulk_upsert([(doc_id, vector, text, metadata)])
+        return
+    raise AttributeError("Store does not support upsert or bulk_upsert")
+
+
+def _bulk_upsert_chunks(
+    store: Any,
+    docs: list[tuple[str, Any, str, dict[str, Any]]],
+) -> None:
+    if hasattr(store, "bulk_upsert"):
+        store.bulk_upsert(docs)
+        return
+    for doc_id, vector, text, metadata in docs:
+        _upsert_single_chunk(
+            store,
+            doc_id=doc_id,
+            vector=vector,
+            text=text,
+            metadata=metadata,
+        )
+
+
+def _fallback_index_chunks_individually(
+    batch: list[ChunkBatchItem],
+    *,
+    embedder: Any,
+    store: Any,
+    batch_error: Exception,
+) -> list[ChunkBatchResult]:
+    """Fallback path that isolates per-chunk failures after batch failure."""
+
+    results: list[ChunkBatchResult] = []
+    for item in batch:
+        try:
+            vector = embedder.embed_single(item.text)
+            _upsert_single_chunk(
+                store,
+                doc_id=item.doc_id,
+                vector=vector,
+                text=item.text,
+                metadata=item.metadata,
+            )
+            results.append(ChunkBatchResult(item=item))
+        except Exception as exc:
+            error = (
+                f"chunk {item.chunk_index} failed after batch fallback: {exc} "
+                f"(batch error: {batch_error})"
+            )
+            results.append(ChunkBatchResult(item=item, error=error))
+    return results
+
+
+def _fallback_store_chunks_individually(
+    batch: list[ChunkBatchItem],
+    embeddings: list[Any],
+    *,
+    store: Any,
+    batch_error: Exception,
+) -> list[ChunkBatchResult]:
+    """Fallback path for bulk storage failures."""
+
+    results: list[ChunkBatchResult] = []
+    for item, vector in zip(batch, embeddings, strict=True):
+        try:
+            _upsert_single_chunk(
+                store,
+                doc_id=item.doc_id,
+                vector=vector,
+                text=item.text,
+                metadata=item.metadata,
+            )
+            results.append(ChunkBatchResult(item=item))
+        except Exception as exc:
+            error = (
+                f"chunk {item.chunk_index} failed after store fallback: {exc} "
+                f"(batch error: {batch_error})"
+            )
+            results.append(ChunkBatchResult(item=item, error=error))
+    return results
+
+
+def _flush_file_chunk_batch(
+    batch: list[ChunkBatchItem],
+    *,
+    embedder: Any,
+    store: Any,
+) -> list[ChunkBatchResult]:
+    texts = [item.text for item in batch]
+    try:
+        embeddings = list(embedder.embed(texts))
+    except Exception as exc:
+        error_console.print(
+            f"[yellow]Batch embed failed for {len(batch)} chunks; falling back to per-chunk mode: {exc}[/yellow]"
+        )
+        return _fallback_index_chunks_individually(
+            batch,
+            embedder=embedder,
+            store=store,
+            batch_error=exc,
+        )
+
+    if len(embeddings) != len(batch):
+        length_error = RuntimeError(
+            f"embedding count mismatch: expected {len(batch)}, got {len(embeddings)}"
+        )
+        return _fallback_index_chunks_individually(
+            batch,
+            embedder=embedder,
+            store=store,
+            batch_error=length_error,
+        )
+
+    bulk_docs = [
+        (item.doc_id, vector, item.text, item.metadata)
+        for item, vector in zip(batch, embeddings, strict=True)
+    ]
+    try:
+        _bulk_upsert_chunks(store, bulk_docs)
+        return [ChunkBatchResult(item=item) for item in batch]
+    except Exception as exc:
+        error_console.print(
+            f"[yellow]Batch store failed for {len(batch)} chunks; falling back to per-chunk mode: {exc}[/yellow]"
+        )
+        return _fallback_store_chunks_individually(
+            batch,
+            embeddings,
+            store=store,
+            batch_error=exc,
+        )
+
+
+def _apply_chunk_batch_results(
+    results: list[ChunkBatchResult],
+    file_states: dict[str, _FileIndexBatchState],
+) -> None:
+    for result in results:
+        state = file_states.get(result.item.relative_path)
+        if state is None:
+            continue
+        if result.success:
+            state.indexed_chunks += 1
+        else:
+            state.errors.append(result.error or "unknown indexing error")
+
+
+def _preserve_previous_file_state(
+    *,
+    incremental: bool,
+    state: _FileIndexBatchState,
+    next_file_hashes: dict[str, str],
+    next_file_chunks: dict[str, int],
+) -> None:
+    if incremental and state.blob_hash and state.previous_hash is not None:
+        next_file_hashes[state.relative_path] = state.previous_hash
+        next_file_chunks[state.relative_path] = state.previous_chunk_count
+
+
 def _is_safe_te_storage_path(data_dir: Path, init_path: Path) -> bool:
     """Validate that data_dir is a safe te-managed storage location.
 
@@ -1146,88 +1358,135 @@ def index_files(  # noqa: PLR0912
         try:
             work_items = build_file_work_items(files_to_process)
             parsed_results = parse_files_pipeline(work_items)
+            file_states: dict[str, _FileIndexBatchState] = {}
+            ordered_file_states: list[str] = []
+            batch_manager = BatchManager(
+                flush_fn=lambda batch: _flush_file_chunk_batch(
+                    batch,
+                    embedder=embedder,
+                    store=store,
+                ),
+            )
 
             for parsed_result in parsed_results:
                 file = Path(parsed_result.work_item.path)
                 rel_path_str = parsed_result.work_item.relative_path
                 blob_hash = parsed_result.work_item.blob_hash
-                indexed_successfully = False
-                indexed_chunk_count = 0
                 previous_hash = file_state.get(rel_path_str)
                 previous_chunk_count = file_chunks.get(rel_path_str, 1)
+                file_state_entry = _FileIndexBatchState(
+                    file_path=file,
+                    relative_path=rel_path_str,
+                    blob_hash=blob_hash,
+                    previous_hash=previous_hash,
+                    previous_chunk_count=previous_chunk_count,
+                )
 
-                try:
-                    if parsed_result.has_error:
-                        skipped_count += 1
-                        error_console.print(
-                            f"[yellow]Skipped {file}: {parsed_result.error}[/yellow]"
-                        )
-                        continue
-
-                    if not parsed_result.chunks:
-                        skipped_count += 1
-                        error_console.print(
-                            f"[yellow]Skipped {file}: no parseable content[/yellow]"
-                        )
-                        continue
-
-                    for fallback_chunk_index, chunk in enumerate(parsed_result.chunks):
-                        metadata = dict(parsed_result.work_item.metadata)
-                        if blob_hash:
-                            metadata["blob_hash"] = blob_hash
-                        metadata.update(chunk.metadata)
-
-                        chunk_index_value = metadata.get("chunk_index")
-                        if (
-                            isinstance(chunk_index_value, bool)
-                            or not isinstance(chunk_index_value, int)
-                            or chunk_index_value < 0
-                        ):
-                            chunk_index = fallback_chunk_index
-                            metadata["chunk_index"] = chunk_index
-                        else:
-                            chunk_index = chunk_index_value
-
-                        doc_id = _build_file_doc_id(parsed_result.work_item.path, chunk_index)
-                        vector = embedder.embed_single(chunk.text)
-                        store.upsert(doc_id, vector, chunk.text, metadata)
-                        indexed_chunk_count += 1
-
-                    if indexed_chunk_count <= 0:
-                        skipped_count += 1
-                        error_console.print(
-                            f"[yellow]Skipped {file}: no parseable content[/yellow]"
-                        )
-                        continue
-
-                    indexed_count += 1
-                    indexed_successfully = True
-
-                    if incremental and blob_hash:
-                        next_file_hashes[rel_path_str] = blob_hash
-                        next_file_chunks[rel_path_str] = indexed_chunk_count
-
-                        if previous_chunk_count > indexed_chunk_count:
-                            _delete_file_docs(
-                                store,
-                                rel_path_str,
-                                repo_root,
-                                start_chunk=indexed_chunk_count,
-                                chunk_count=previous_chunk_count,
-                            )
-                except Exception as e:
+                if parsed_result.has_error:
                     skipped_count += 1
-                    error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
-                finally:
-                    if (
-                        incremental
-                        and blob_hash
-                        and not indexed_successfully
-                        and previous_hash is not None
-                    ):
-                        # Preserve previous successful hash so failed updates are retried.
-                        next_file_hashes[rel_path_str] = previous_hash
-                        next_file_chunks[rel_path_str] = previous_chunk_count
+                    error_console.print(
+                        f"[yellow]Skipped {file}: {parsed_result.error}[/yellow]"
+                    )
+                    _preserve_previous_file_state(
+                        incremental=incremental,
+                        state=file_state_entry,
+                        next_file_hashes=next_file_hashes,
+                        next_file_chunks=next_file_chunks,
+                    )
+                    continue
+
+                if not parsed_result.chunks:
+                    skipped_count += 1
+                    error_console.print(
+                        f"[yellow]Skipped {file}: no parseable content[/yellow]"
+                    )
+                    _preserve_previous_file_state(
+                        incremental=incremental,
+                        state=file_state_entry,
+                        next_file_hashes=next_file_hashes,
+                        next_file_chunks=next_file_chunks,
+                    )
+                    continue
+
+                file_states[rel_path_str] = file_state_entry
+                ordered_file_states.append(rel_path_str)
+
+                base_metadata = dict(parsed_result.work_item.metadata)
+                if blob_hash:
+                    base_metadata["blob_hash"] = blob_hash
+
+                for fallback_chunk_index, chunk in enumerate(parsed_result.chunks):
+                    metadata, chunk_index = _normalize_chunk_metadata(
+                        base_metadata=base_metadata,
+                        chunk_metadata=chunk.metadata,
+                        fallback_chunk_index=fallback_chunk_index,
+                    )
+                    file_state_entry.expected_chunks += 1
+                    batch_results = batch_manager.add(
+                        ChunkBatchItem(
+                            doc_id=_build_file_doc_id(parsed_result.work_item.path, chunk_index),
+                            text=chunk.text,
+                            metadata=metadata,
+                            file_path=parsed_result.work_item.path,
+                            relative_path=rel_path_str,
+                            chunk_index=chunk_index,
+                        )
+                    )
+                    _apply_chunk_batch_results(batch_results, file_states)
+
+            _apply_chunk_batch_results(batch_manager.flush(), file_states)
+
+            for rel_path_str in ordered_file_states:
+                file_state_entry = file_states[rel_path_str]
+                indexed_chunk_count = file_state_entry.indexed_chunks
+
+                if indexed_chunk_count <= 0:
+                    skipped_count += 1
+                    error_console.print(
+                        f"[yellow]Skipped {file_state_entry.file_path}: no parseable content[/yellow]"
+                    )
+                    _preserve_previous_file_state(
+                        incremental=incremental,
+                        state=file_state_entry,
+                        next_file_hashes=next_file_hashes,
+                        next_file_chunks=next_file_chunks,
+                    )
+                    continue
+
+                if (
+                    file_state_entry.errors
+                    or indexed_chunk_count != file_state_entry.expected_chunks
+                ):
+                    skipped_count += 1
+                    failure_reason = (
+                        file_state_entry.errors[0]
+                        if file_state_entry.errors
+                        else "one or more chunks failed to index"
+                    )
+                    error_console.print(
+                        f"[yellow]Skipped {file_state_entry.file_path}: {failure_reason}[/yellow]"
+                    )
+                    _preserve_previous_file_state(
+                        incremental=incremental,
+                        state=file_state_entry,
+                        next_file_hashes=next_file_hashes,
+                        next_file_chunks=next_file_chunks,
+                    )
+                    continue
+
+                indexed_count += 1
+                if incremental and file_state_entry.blob_hash:
+                    next_file_hashes[rel_path_str] = file_state_entry.blob_hash
+                    next_file_chunks[rel_path_str] = indexed_chunk_count
+
+                    if file_state_entry.previous_chunk_count > indexed_chunk_count:
+                        _delete_file_docs(
+                            store,
+                            rel_path_str,
+                            repo_root,
+                            start_chunk=indexed_chunk_count,
+                            chunk_count=file_state_entry.previous_chunk_count,
+                        )
 
             # Handle deletions: files that were in state but are no longer tracked
             if incremental and file_state:

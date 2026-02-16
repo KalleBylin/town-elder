@@ -1,6 +1,7 @@
 """Embedder implementation using fastembed."""
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 
 import numpy as np
@@ -19,6 +20,7 @@ class Embedder:
 
     DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
     DEFAULT_DIMENSION = 384  # bge-small-en-v1.5
+    DEFAULT_BATCH_SIZE = 256
 
     # Known model dimensions for validation
     MODEL_DIMENSIONS: dict[str, int] = {
@@ -32,6 +34,8 @@ class Embedder:
         model_name: str = DEFAULT_MODEL,
         embed_dimension: int | None = None,
         allow_fallback: bool = False,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        parallel: int | None = None,
     ):
         """Initialize the Embedder.
 
@@ -40,11 +44,15 @@ class Embedder:
             embed_dimension: Expected embedding dimension from config.
                              If provided, validates against model dimension.
             allow_fallback: If True, allow returning zero vectors when model unavailable.
+            batch_size: Default embedding batch size for backend calls.
+            parallel: Default embedding parallelism for backend calls.
         """
         self.model_name = model_name
         self._embed_dimension = embed_dimension
         self._model = None
         self._allow_fallback = allow_fallback
+        self.batch_size = max(batch_size, 1)
+        self.parallel = parallel if parallel is not None else (os.cpu_count() or 1)
 
         # Validate dimension at initialization if provided
         if embed_dimension is not None:
@@ -73,7 +81,13 @@ class Embedder:
                         "Install fastembed: pip install fastembed"
                     )
 
-    def embed(self, texts: list[str]) -> Iterator[np.ndarray]:
+    def embed(
+        self,
+        texts: list[str],
+        *,
+        batch_size: int | None = None,
+        parallel: int | None = None,
+    ) -> Iterator[np.ndarray]:
         """Generate embeddings for a list of texts."""
         self._load_model()
         if self._model is None:
@@ -82,7 +96,19 @@ class Embedder:
             for _ in texts:
                 yield np.zeros(dim, dtype=np.float32)
         else:
-            yield from self._model.embed(texts)
+            effective_batch_size = batch_size if batch_size is not None else self.batch_size
+            effective_parallel = parallel if parallel is not None else self.parallel
+            try:
+                yield from self._model.embed(
+                    texts,
+                    batch_size=effective_batch_size,
+                    parallel=effective_parallel,
+                )
+            except TypeError as exc:
+                # Backwards-compatible fallback for older fastembed versions.
+                if "unexpected keyword argument" not in str(exc):
+                    raise
+                yield from self._model.embed(texts)
 
     def embed_single(self, text: str) -> np.ndarray:
         """Generate embedding for a single text."""

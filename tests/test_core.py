@@ -18,6 +18,9 @@ _DEFAULT_TOP_K = 5
 _MIN_TOP_K = 2
 _MAX_TOP_K = 5
 _EXPECTED_DIFF_FILE_COUNT = 3
+_EMBED_BATCH_COUNT = 2
+_EXPECTED_BULK_DOC_COUNT = 2
+_UPDATED_VERSION = 2
 
 
 class TestEmbedder:
@@ -91,6 +94,33 @@ class TestEmbedder:
         assert isinstance(vector, np.ndarray)
         assert vector.shape == (_DEFAULT_EMBED_DIMENSION,)
 
+    def test_embed_passes_default_batch_tuning_to_backend(self, monkeypatch):
+        """Embedder should pass default batch/parallel settings to fastembed."""
+        expected_parallel = 7
+        monkeypatch.setattr(
+            "town_elder.embeddings.embedder.os.cpu_count",
+            lambda: expected_parallel,
+        )
+
+        embedder = Embedder()
+
+        class FakeModel:
+            def __init__(self):
+                self.calls: list[tuple[int, int]] = []
+
+            def embed(self, texts: list[str], *, batch_size: int, parallel: int):
+                self.calls.append((batch_size, parallel))
+                for _ in texts:
+                    yield np.zeros(_DEFAULT_EMBED_DIMENSION, dtype=np.float32)
+
+        fake_model = FakeModel()
+        embedder._model = fake_model
+
+        vectors = list(embedder.embed(["a", "b"]))
+
+        assert len(vectors) == _EMBED_BATCH_COUNT
+        assert fake_model.calls == [(Embedder.DEFAULT_BATCH_SIZE, expected_parallel)]
+
 
 class TestVectorStore:
     """Tests for the VectorStore class."""
@@ -111,6 +141,37 @@ class TestVectorStore:
         )
         assert doc_id == "doc1"
         assert sample_vector_store.count() == 1
+
+    def test_vector_store_bulk_insert(self, sample_vector_store, sample_vectors):
+        """Test inserting multiple documents in a single bulk call."""
+        doc_ids = sample_vector_store.bulk_insert([
+            ("doc1", sample_vectors[0], "document one", {"index": 1}),
+            ("doc2", sample_vectors[1], "document two", {"index": _EXPECTED_BULK_DOC_COUNT}),
+        ])
+        assert doc_ids == ["doc1", "doc2"]
+        assert sample_vector_store.count() == _EXPECTED_BULK_DOC_COUNT
+
+    def test_vector_store_bulk_upsert(self, sample_vector_store, sample_vectors):
+        """Test upserting multiple documents with updates."""
+        sample_vector_store.insert(
+            doc_id="doc1",
+            vector=sample_vectors[0],
+            text="original",
+            metadata={"version": 1},
+        )
+
+        doc_ids = sample_vector_store.bulk_upsert([
+            ("doc1", sample_vectors[1], "updated", {"version": _UPDATED_VERSION}),
+            ("doc2", sample_vectors[2], "new doc", {"version": 1}),
+        ])
+
+        assert doc_ids == ["doc1", "doc2"]
+        assert sample_vector_store.count() == _EXPECTED_BULK_DOC_COUNT
+
+        updated = sample_vector_store.get("doc1")
+        assert updated is not None
+        assert updated["text"] == "updated"
+        assert updated["metadata"]["version"] == _UPDATED_VERSION
 
     def test_vector_store_get(self, sample_vector_store, sample_vectors):
         """Test getting a document by ID."""
