@@ -39,6 +39,8 @@ class IndexService:
             text = file_path.read_text()
         except OSError as e:
             raise IndexingError(f"Failed to read file {file_path}: {e}") from e
+        except UnicodeDecodeError as e:
+            raise IndexingError(f"Failed to decode file {file_path}: {e}") from e
 
         # zvec requires alphanumeric doc_ids, so we hash the path
         file_path_str = str(file_path)
