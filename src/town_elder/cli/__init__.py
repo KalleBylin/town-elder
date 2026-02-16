@@ -69,6 +69,37 @@ def _get_git_dir(repo_path: Path) -> Path:
     return git_path
 
 
+def _get_common_git_dir(repo_path: Path) -> Path:
+    """Get the common .git directory path for the repository.
+
+    For regular repos, this returns the .git directory.
+    For worktrees, this returns the main repository's .git directory (not the
+    worktree-specific one). This is the correct directory for hooks since Git
+    executes hooks from the common gitdir, not the worktree-private one.
+
+    Uses 'git rev-parse --git-common-dir' to determine the correct path.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        git_common_dir = result.stdout.strip()
+        git_dir_path = Path(git_common_dir)
+        # Resolve relative paths against the repo_path
+        if not git_dir_path.is_absolute():
+            git_dir_path = (repo_path / git_dir_path).resolve()
+        return git_dir_path
+    except subprocess.CalledProcessError:
+        # Fallback to _get_git_dir if git command fails
+        return _get_git_dir(repo_path)
+
+
 def _is_te_hook(content: str) -> bool:
     """Check if hook content is a Town Elder commit-index hook.
 
@@ -459,7 +490,7 @@ def init(  # noqa: PLR0912
 
     # Optionally install hook
     if install_hook:
-        git_dir = _get_git_dir(init_path)
+        git_dir = _get_common_git_dir(init_path)
         if not git_dir.exists():
             console.print("[yellow]Warning: Not a git repository, skipping hook installation[/yellow]")
         else:
@@ -992,7 +1023,7 @@ def install(
     import os
 
     repo_path = Path(path).resolve()
-    git_dir = _get_git_dir(repo_path)
+    git_dir = _get_common_git_dir(repo_path)
     hooks_dir = git_dir / "hooks"
     hook_path = hooks_dir / "post-commit"
 
@@ -1069,7 +1100,7 @@ def uninstall(
 ) -> None:
     """Remove post-commit hook."""
     repo_path = Path(path).resolve()
-    git_dir = _get_git_dir(repo_path)
+    git_dir = _get_common_git_dir(repo_path)
     hook_path = git_dir / "hooks" / "post-commit"
 
     # Check if it's a git repository
@@ -1103,7 +1134,7 @@ def hook_status(
 ) -> None:
     """Check if post-commit hook is installed."""
     repo_path = Path(path).resolve()
-    git_dir = _get_git_dir(repo_path)
+    git_dir = _get_common_git_dir(repo_path)
 
     if not git_dir.exists():
         console.print(f"[red]Not a git repository: {path}[/red]")
