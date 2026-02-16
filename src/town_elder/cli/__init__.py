@@ -71,6 +71,19 @@ def _get_git_dir(repo_path: Path) -> Path:
     return git_path
 
 
+def _find_git_executable() -> str:
+    """Find the git executable using shutil.which.
+
+    Returns the path to git if found, otherwise raises FileNotFoundError.
+    This ensures portability across different systems where git may be
+    installed in non-standard locations.
+    """
+    git_path = shutil.which("git")
+    if git_path is None:
+        raise FileNotFoundError("git executable not found in PATH")
+    return git_path
+
+
 def _get_common_git_dir(repo_path: Path) -> Path:
     """Get the common .git directory path for the repository.
 
@@ -83,7 +96,7 @@ def _get_common_git_dir(repo_path: Path) -> Path:
     """
     try:
         result = subprocess.run(
-            ["/usr/bin/git", "rev-parse", "--git-common-dir"],
+            [_find_git_executable(), "rev-parse", "--git-common-dir"],
             cwd=repo_path,
             capture_output=True,
             text=True,
@@ -109,7 +122,7 @@ def _get_git_repo_root(repo_path: Path) -> Path | None:
     """
     try:
         result = subprocess.run(
-            ["/usr/bin/git", "rev-parse", "--show-toplevel"],
+            [_find_git_executable(), "rev-parse", "--show-toplevel"],
             cwd=repo_path,
             capture_output=True,
             text=True,
