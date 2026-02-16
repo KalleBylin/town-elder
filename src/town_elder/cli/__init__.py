@@ -1285,6 +1285,14 @@ def hook_status(
 app.add_typer(hook_app, name="hook")
 
 
+# Backward compatibility: 'te commit-index' is now 'te index commits'
+# Keep the old command as a deprecated alias
+@app.command("commit-index", deprecated=True)
+def _commit_index_compat() -> None:
+    """[DEPRECATED] Use 'te index commits' instead."""
+    raise typer.Exit(code=EXIT_INVALID_ARG)
+
+
 @app.command()
 def export(  # noqa: PLR0912
     ctx: typer.Context,
