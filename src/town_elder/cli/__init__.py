@@ -660,7 +660,7 @@ def search(
     _run_search(ctx, query=query, top_k=top_k)
 
 
-@app.command("query")
+@app.command("query", hidden=True)
 def query(
     ctx: typer.Context,
     query: str = typer.Argument(..., help="Search query text"),
@@ -681,11 +681,15 @@ def query(
 @app.command()
 def add(
     ctx: typer.Context,
-    text: str = typer.Option(
-        ...,
+    text: str = typer.Argument(
+        None,
+        help="Text content to add to the vector store",
+    ),
+    text_option: str = typer.Option(
+        None,
         "--text",
         "-t",
-        help="Text content to add to the vector store",
+        help="Text content to add to the vector store (alternative to positional argument)",
     ),
     metadata: str = typer.Option(
         "",
@@ -699,6 +703,14 @@ def add(
     Embeds the text and stores it with optional metadata.
     """
     import uuid
+
+    # Allow both positional argument and --text option
+    if text is None and text_option is None:
+        error_console.print("[red]Error: Either provide text as argument or use --text option[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+
+    # Prefer positional argument, fall back to option
+    text_content = text if text is not None else text_option
 
     # Parse metadata with better error message
     meta = {}
@@ -719,10 +731,10 @@ def add(
         try:
             # Embed the text
             doc_id = meta.get("id", str(uuid.uuid4()))
-            vector = embedder.embed_single(text)
+            vector = embedder.embed_single(text_content)
 
             # Store
-            store.insert(doc_id, vector, text, meta)
+            store.insert(doc_id, vector, text_content, meta)
         except Exception as e:
             console.print(f"[red]Error storing document:[/red] {_escape_rich(str(e))}")
             raise typer.Exit(code=EXIT_ERROR)
@@ -739,7 +751,7 @@ def stats(ctx: typer.Context) -> None:
     _run_stats(ctx)
 
 
-@app.command("status")
+@app.command("status", hidden=True)
 def status(ctx: typer.Context) -> None:
     """Show indexing statistics and storage info.
 
