@@ -50,6 +50,9 @@ def _get_git_dir(repo_path: Path) -> Path:
 
     In regular git repos, .git is a directory.
     In git worktrees, .git is a file that points to the actual git directory.
+
+    When the gitdir path is relative (common in submodules and some worktree
+    setups), it is resolved relative to the .git file's location (repo_path).
     """
     git_path = repo_path / ".git"
     if git_path.is_file():
@@ -57,7 +60,11 @@ def _get_git_dir(repo_path: Path) -> Path:
         content = git_path.read_text()
         if content.startswith("gitdir:"):
             actual_git_dir = content.split(":", 1)[1].strip()
-            return Path(actual_git_dir)
+            # Resolve relative paths against the repo's .git file location
+            git_dir_path = Path(actual_git_dir)
+            if not git_dir_path.is_absolute():
+                git_dir_path = (git_path.parent / git_dir_path).resolve()
+            return git_dir_path
     return git_path
 
 
