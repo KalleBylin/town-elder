@@ -205,6 +205,10 @@ def _load_index_state(state_file: Path, repo_path: Path) -> tuple[str | None, di
     if "repos" not in state:
         state = {"repos": {}}
 
+    # Ensure we have a valid dict (could be corrupted or non-dict from manual edit)
+    if not isinstance(state["repos"], dict):
+        state = {"repos": {}}
+
     repo_id = _get_repo_id(repo_path)
     repo_state = state["repos"].get(repo_id, {})
     last_indexed = repo_state.get("last_indexed_commit")
