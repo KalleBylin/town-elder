@@ -110,15 +110,21 @@ def _is_te_hook(content: str) -> bool:
     - Absolute interpreter paths (e.g., /usr/bin/python or sys.executable)
     - te command invocation
 
-    Note: Only matches actual command invocations, not comment text.
+    Note: Only matches actual command invocations, not comment text or quoted strings.
     """
     import re
+
+    # First, filter out quoted strings to avoid false positives like:
+    # echo "te commit-index" -> the string "te commit-index" should not match
+    # We use a simple approach: remove content within single or double quotes
+    content_without_strings = re.sub(r'"[^"]*"', '', content)  # Remove double-quoted strings
+    content_without_strings = re.sub(r"'[^']*'", '', content_without_strings)  # Remove single-quoted strings
 
     # Filter out comment lines to avoid false positives.
     # A line is considered a comment if it starts with # (after stripping leading whitespace)
     # but we exclude shebang lines (#!/...).
     non_comment_lines = []
-    for line in content.splitlines():
+    for line in content_without_strings.splitlines():
         stripped = line.lstrip()
         # Skip comment lines (but not shebang lines like #!/bin/sh)
         if stripped.startswith("#") and not stripped.startswith("#!"):

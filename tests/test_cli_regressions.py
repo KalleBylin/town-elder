@@ -369,6 +369,42 @@ te commit-index --repo "$(git rev-parse --show-toplevel)"
     assert _is_te_hook(content) is True
 
 
+def test_is_te_hook_rejects_quoted_strings():
+    """Hook detection should reject hooks that only contain the TE command in a string.
+
+    This is a regression test for the bug where 'echo "te commit-index"' would
+    incorrectly be detected as a Town Elder hook.
+    """
+    from town_elder.cli import _is_te_hook
+
+    # Non-TE hook with double-quoted string should be rejected
+    content = '''#!/bin/sh
+echo "te commit-index"
+other-tool --run
+'''
+    assert _is_te_hook(content) is False
+
+    # Non-TE hook with single-quoted string should be rejected
+    content = '''#!/bin/sh
+echo 'te commit-index'
+other-tool --run
+'''
+    assert _is_te_hook(content) is False
+
+
+def test_is_te_hook_accepts_quoted_strings_with_actual_command():
+    """Hook detection should still detect TE hooks that have quoted strings AND the actual command."""
+    from town_elder.cli import _is_te_hook
+
+    # This SHOULD be detected as a TE hook because the actual command is present
+    content = '''#!/bin/sh
+echo "te commit-index"
+te commit-index --repo "$(git rev-parse --show-toplevel)"
+echo "done"
+'''
+    assert _is_te_hook(content) is True
+
+
 def test_hook_generation_uses_python_m_town_elder(tmp_path):
     """Generated hooks should use 'uv run te' for robustness across pyenv/uv environments."""
     # Create a minimal git repo
