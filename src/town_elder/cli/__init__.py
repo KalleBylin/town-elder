@@ -248,7 +248,10 @@ def _validate_data_dir_option(data_dir: Path, invoked_subcommand: str | None) ->
         f"{_escape_rich(str(data_dir))}"
     )
     error_console.print(
-        "[dim]Use 'te --data-dir <path> init --path <repo>' to create it.[/dim]"
+        "[dim]Use 'te --data-dir <path> init --path <repo>' to create it,[/dim]"
+    )
+    error_console.print(
+        "[dim]or run 'te init' to use the default .town_elder in current directory.[/dim]"
     )
     raise typer.Exit(code=EXIT_ERROR)
 
@@ -464,7 +467,9 @@ def main(
         None,
         "--data-dir",
         "-d",
-        help="Data directory (default: .town_elder in current directory)",
+        help="Data directory. Default: .town_elder in current directory. "
+        "Set TOWN_ELDER_DATA_DIR env var to avoid passing this option. "
+        "Use a custom path for isolated sessions or cross-repo operations.",
     ),
     version: bool | None = typer.Option(
         None,

@@ -205,10 +205,14 @@ def get_cli_services(
     except DatabaseNotInitializedError:
         error_console.print("[red]Error: Database not initialized[/red]")
         console.print("[dim]Run 'te init' first to initialize the database[/dim]")
+        console.print("[dim]Or use --data-dir to specify a custom location[/dim]")
+        console.print("[dim]Or set TOWN_ELDER_DATA_DIR environment variable[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
     except ConfigError as e:
         error_console.print("[red]Error: Database not initialized[/red]")
         console.print(f"[dim]{e}[/dim]")
+        console.print("[dim]Or use --data-dir to specify a custom location[/dim]")
+        console.print("[dim]Or set TOWN_ELDER_DATA_DIR environment variable[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
 
     # Create services
@@ -250,8 +254,12 @@ def require_initialized(ctx: typer.Context) -> TownElderConfig:
     except DatabaseNotInitializedError:
         error_console.print("[red]Error: Database not initialized[/red]")
         console.print("[dim]Run 'te init' first to initialize the database[/dim]")
+        console.print("[dim]Or use --data-dir to specify a custom location[/dim]")
+        console.print("[dim]Or set TOWN_ELDER_DATA_DIR environment variable[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
     except ConfigError as e:
         error_console.print("[red]Error: Database not initialized[/red]")
         console.print(f"[dim]{e}[/dim]")
+        console.print("[dim]Or use --data-dir to specify a custom location[/dim]")
+        console.print("[dim]Or set TOWN_ELDER_DATA_DIR environment variable[/dim]")
         raise typer.Exit(code=EXIT_ERROR)
