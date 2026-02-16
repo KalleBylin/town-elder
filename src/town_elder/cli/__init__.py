@@ -907,7 +907,7 @@ def index_commits(  # noqa: PLR0912, PLR0913
     _run_commit_index(ctx, path, limit, all_history, batch_size, max_diff_size, incremental, force)
 
 
-def _run_commit_index(
+def _run_commit_index(  # noqa: PLR0912, PLR0913
     ctx: typer.Context,
     path: str,
     limit: int,
