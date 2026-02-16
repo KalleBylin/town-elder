@@ -293,6 +293,12 @@ class GitRunner:
                     diff_text = diff_text[:max_size] + f"\n\n[truncated - exceeded {max_size} byte limit]"
                 diffs[current_hash] = diff_text
 
+            # Verify we got exactly the requested hashes
+            # git log may omit commits when hashes are non-contiguous
+            if set(diffs.keys()) != set(commit_hashes):
+                # Fallback to individual calls to ensure we return exactly requested hashes
+                return {h: self.get_diff(h, max_size) for h in commit_hashes}
+
             return diffs
         except subprocess.CalledProcessError:
             # Fallback to individual calls if batch fails
