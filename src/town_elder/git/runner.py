@@ -273,8 +273,8 @@ class GitRunner:
                     # Extract hash from the line
                     parts = line.split(_LOG_RECORD_SEPARATOR)
                     if len(parts) >= 1 and parts[0]:
-                        # Save previous commit if exists
-                        if current_hash and current_diff_lines:
+                        # Save previous commit if exists (even if empty - e.g., merge commits)
+                        if current_hash:
                             diff_text = "\n".join(current_diff_lines)
                             if len(diff_text.encode()) > max_size:
                                 diff_text = diff_text[:max_size] + f"\n\n[truncated - exceeded {max_size} byte limit]"
@@ -286,8 +286,8 @@ class GitRunner:
                 elif current_hash:
                     current_diff_lines.append(line)
 
-            # Don't forget the last commit
-            if current_hash and current_diff_lines:
+            # Don't forget the last commit (even if empty - e.g., merge commits)
+            if current_hash:
                 diff_text = "\n".join(current_diff_lines)
                 if len(diff_text.encode()) > max_size:
                     diff_text = diff_text[:max_size] + f"\n\n[truncated - exceeded {max_size} byte limit]"

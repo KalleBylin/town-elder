@@ -273,6 +273,86 @@ class TestGitRunnerGetDiff:
 
         assert set(diffs) == set(commit_hashes)
 
+    def test_get_diffs_batch_returns_all_hashes_including_merge_commits(
+        self,
+        temp_git_repo: Path,
+    ):
+        """get_diffs_batch should return all requested hashes including merge commits."""
+        runner = GitRunner(repo_path=temp_git_repo)
+
+        # Create a branch with a commit
+        subprocess.run(
+            ["git", "checkout", "-b", "feature"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+        (temp_git_repo / "feature.txt").write_text("feature change")
+        subprocess.run(["git", "add", "."], cwd=temp_git_repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feature commit"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+        feature_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        # Switch back to main and create another commit
+        subprocess.run(
+            ["git", "checkout", "main"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+        (temp_git_repo / "main.txt").write_text("main change")
+        subprocess.run(["git", "add", "."], cwd=temp_git_repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "main commit"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+        main_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        # Create a merge commit
+        subprocess.run(
+            ["git", "merge", feature_hash, "--no-ff", "-m", "merge feature"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+        merge_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        # Get all commits and verify we can get diffs for all of them
+        commits = runner.get_commits(limit=10)
+        commit_hashes = [c.hash for c in commits]
+
+        # Verify we have the expected commits
+        assert feature_hash in commit_hashes
+        assert main_hash in commit_hashes
+        assert merge_hash in commit_hashes
+
+        # get_diffs_batch should return all requested hashes including merge
+        diffs = runner.get_diffs_batch(commit_hashes)
+
+        assert set(diffs.keys()) == set(commit_hashes)
+        assert all(isinstance(diff, str) for diff in diffs.values())
+
 
 class TestGitRunnerGetCommitRange:
     """Tests for get_commit_range method."""
