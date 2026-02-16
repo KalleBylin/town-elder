@@ -16,7 +16,7 @@ class QueryService:
     ):
         config = get_config()
         self.store = store or ZvecStore(config.data_dir / "vectors")
-        self.embedder = embedder or Embedder()
+        self.embedder = embedder or Embedder(model_name=config.embed_model)
 
     def search(self, query: str, top_k: int | None = None) -> list[dict]:
         """Search for documents similar to the query."""
