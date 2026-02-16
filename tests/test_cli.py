@@ -589,7 +589,7 @@ class TestExitCodes:
 
     def test_init_force_clears_existing_data(self, temp_git_repo: Path):
         """te init --force should clear existing data and reset document count to 0."""
-        data_dir = temp_git_repo / ".town_elder_force_test"
+        data_dir = temp_git_repo / ".town_elder_custom_force"
 
         # First, initialize the database
         result = subprocess.run(
@@ -695,6 +695,37 @@ class TestInitErrorHandling:
         assert result.returncode != 0
         output = result.stderr + result.stdout
         assert "unsafe" in output.lower() or "safety" in output.lower() or "refusing" in output.lower()
+
+    def test_init_force_refuses_arbitrary_hidden_dirs(self, temp_git_repo: Path):
+        """te init --force should refuse arbitrary hidden directories like .git."""
+        # First initialize with .town_elder
+        safe_data_dir = temp_git_repo / ".town_elder"
+        subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(safe_data_dir), "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+
+        # Create a .git directory to simulate the scenario
+        git_dir = temp_git_repo / ".git"
+        git_dir.mkdir(exist_ok=True)
+        (git_dir / "config").write_text("")
+        (git_dir / "HEAD").write_text("ref: refs/heads/main")
+
+        # Try to use .git as data-dir with --force (should be rejected as unsafe)
+        result = subprocess.run(
+            ["uv", "run", "te", "--data-dir", str(git_dir), "init", "--force", "--path", str(temp_git_repo)],
+            capture_output=True,
+            text=True,
+        )
+        # Should fail with safety error
+        assert result.returncode != 0
+        output = result.stderr + result.stdout
+        assert "unsafe" in output.lower() or "safety" in output.lower() or "refusing" in output.lower()
+
+        # Verify .git was NOT deleted
+        assert git_dir.exists()
+        assert (git_dir / "config").exists()
 
     def test_init_with_force_clears_data(self, temp_git_repo: Path):
         """te init --force should clear existing data."""
