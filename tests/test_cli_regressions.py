@@ -335,6 +335,32 @@ ate commit-index --repo "$(git rev-parse --show-toplevel)"
     assert _is_te_hook(content) is False
 
 
+def test_is_te_hook_rejects_comment_text():
+    """Hook detection should reject TE patterns in comment text."""
+    from town_elder.cli import _is_te_hook
+
+    # This should NOT be detected as a TE hook even though it contains "te commit-index"
+    # in a comment
+    content = '''#!/bin/sh
+# This is a comment about te commit-index
+echo "Running other hook"
+other-tool commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_te_hook(content) is False
+
+
+def test_is_te_hook_rejects_shebang_in_comment():
+    """Hook detection should still detect TE hooks that have comments above the command."""
+    from town_elder.cli import _is_te_hook
+
+    # This SHOULD be detected as a TE hook because the actual command is present
+    content = '''#!/bin/sh
+# Town Elder post-commit hook - automatically indexes commits
+te commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_te_hook(content) is True
+
+
 def test_hook_generation_uses_python_m_town_elder(tmp_path):
     """Generated hooks should use 'uv run te' for robustness across pyenv/uv environments."""
     # Create a minimal git repo

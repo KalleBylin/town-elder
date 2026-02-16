@@ -67,8 +67,22 @@ def _is_te_hook(content: str) -> bool:
     - uv run te invocation
     - Absolute interpreter paths (e.g., /usr/bin/python or sys.executable)
     - te command invocation
+
+    Note: Only matches actual command invocations, not comment text.
     """
     import re
+
+    # Filter out comment lines to avoid false positives.
+    # A line is considered a comment if it starts with # (after stripping leading whitespace)
+    # but we exclude shebang lines (#!/...).
+    non_comment_lines = []
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        # Skip comment lines (but not shebang lines like #!/bin/sh)
+        if stripped.startswith("#") and not stripped.startswith("#!"):
+            continue
+        non_comment_lines.append(line)
+    non_comment_content = "\n".join(non_comment_lines)
 
     # Match patterns for te/town_elder hooks:
     # - te commit-index
@@ -98,7 +112,7 @@ def _is_te_hook(content: str) -> bool:
         r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
     ]
 
-    return any(re.search(pattern, content) for pattern in patterns)
+    return any(re.search(pattern, non_comment_content) for pattern in patterns)
 
 
 def _safe_read_hook(hook_path: Path) -> str | None:
