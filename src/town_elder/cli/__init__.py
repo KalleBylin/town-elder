@@ -45,7 +45,24 @@ app = typer.Typer(
 index_app = typer.Typer(
     help="Index project files and commit history",
     no_args_is_help=True,
+    invoke_without_command=True,
 )
+
+
+@index_app.callback(context_settings={"help_option_names": ["-h", "--help"]})
+def index_callback(
+    ctx: typer.Context,
+    all: bool = typer.Option(
+        False,
+        "--all",
+        help="Index all project files in current directory (full repository file indexing)",
+    ),
+) -> None:
+    """Index subcommand: use 'te index --all' for full file indexing, or 'te index files' / 'te index commits' for specific indexing."""
+    if all:
+        # Route to index_files with default path "."
+        # Must pass None for exclude since that's the default in index_files
+        ctx.invoke(index_files, ctx=ctx, path=".", exclude=None)
 
 # Global data directory option - DEPRECATED, use CLIContext instead
 _data_dir: Path | None = None

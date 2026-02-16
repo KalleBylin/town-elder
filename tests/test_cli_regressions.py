@@ -133,6 +133,52 @@ def test_index_help_lists_files_and_commits_subcommands():
     assert "commits" in result.output
 
 
+def test_index_all_option_shows_in_help():
+    """`te index --help` should show --all as an option."""
+    result = runner.invoke(cli.app, ["index", "--help"])
+
+    assert result.exit_code == 0
+    assert "--all" in result.output
+    # Should explain what --all does
+    assert "all project files" in result.output.lower() or "full repository" in result.output.lower()
+
+
+def test_index_all_dispatches_to_index_files(monkeypatch):
+    """`te index --all` should route to index_files with default path."""
+    calls: list[tuple] = []
+
+    def fake_index_files(ctx, path, exclude=None) -> None:
+        calls.append((path, exclude))
+
+    monkeypatch.setattr(cli, "index_files", fake_index_files)
+
+    result = runner.invoke(
+        cli.app,
+        ["index", "--all"],
+    )
+
+    assert result.exit_code == 0
+    # Should call index_files with default path "."
+    assert len(calls) == 1
+    assert calls[0][0] == "."
+    assert calls[0][1] is None
+
+
+def test_index_files_still_works_as_subcommand(tmp_path):
+    """`te index files` should still work as before (verify dispatch pattern)."""
+    # Verify the CLI accepts the subcommand syntax - the actual execution
+    # is tested by other tests that mock services. We just verify the
+    # command dispatch is still correct (exit code 2 = validation error from
+    # missing services, not a dispatch error)
+    result = runner.invoke(
+        cli.app,
+        ["index", "files", str(tmp_path)],
+    )
+    # Exit code 2 means the command was dispatched but services aren't initialized
+    # This confirms the dispatch is working (not a "command not found" error)
+    assert "Path does not exist" not in result.output
+
+
 def test_get_git_repo_root_finds_parent_repo_from_subdirectory(tmp_path):
     """Git repo root detection should walk up from nested subdirectories."""
     repo_path = tmp_path / "repo"

@@ -26,8 +26,8 @@ Town Elder is useful when it reliably delivers these outcomes:
 # Initialize Town Elder in your project (using uv)
 uv run te init
 
-# Index your code files
-uv run te index files
+# Index your code files (full file indexing)
+uv run te index --all
 
 # Search semantically
 uv run te search "authentication logic"
@@ -70,7 +70,7 @@ uv run te init
 ```
 2. Build memory from code and commit history:
 ```bash
-uv run te index files
+uv run te index --all
 uv run te index commits --limit 200
 ```
 3. Ask intent-level questions:
@@ -153,7 +153,7 @@ $ uv run te init
 Initialized Town Elder database at /path/to/project/.town_elder
 
 # Index your codebase (Python and Markdown files)
-$ uv run te index files
+$ uv run te index --all
 Indexing 42 files...
 Indexed 42 files
 
@@ -218,10 +218,11 @@ Commands are shown with `uv run te`. You can use `uvx --from town-elder te` equi
 |---------|-------------|
 | `uv run te init` | Initialize a Town Elder database in the current directory |
 | `uv run te add` | Add a document with optional metadata |
-| `uv run te index files` | Index all `.py` and `.md` files in a directory |
+| `uv run te index --all` | Index all `.py` and `.md` files in current directory (full repository file indexing) |
+| `uv run te index files [PATH]` | Index all `.py` and `.md` files in a specific directory |
+| `uv run te index commits` | Index git commits from a repository |
 | `uv run te search` | Search indexed documents semantically |
 | `uv run te stats` | Show document count and configuration |
-| `uv run te index commits` | Index git commits from a repository |
 | `uv run te hook install` | Install post-commit hook for automatic indexing |
 | `uv run te hook uninstall` | Remove post-commit hook |
 | `uv run te hook status` | Check if hook is installed |
@@ -231,6 +232,7 @@ Commands are shown with `uv run te`. You can use `uvx --from town-elder te` equi
 - `--data-dir`, `-d`: Data directory (default: .town_elder in current directory)
 - `--path`, `-p`: Specify directory path (for init)
 - `index files [PATH]`: Positional directory path for file indexing (default: current directory)
+- `index --all`: Index all files in current directory (equivalent to `te index files .`)
 - `--top-k`, `-k`: Number of search results (default: 5)
 - `--limit`, `-n`: Number of commits to index (default: 100)
 - `--repo`, `-r`: Git repository path (for index commits, hook commands)
