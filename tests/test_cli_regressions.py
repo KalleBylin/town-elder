@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -418,9 +419,9 @@ def test_hook_generation_quotes_data_dir(tmp_path):
     assert hook_path.exists()
 
     hook_content = hook_path.read_text()
-    # Check that the path is quoted
-    assert '--data-dir "' in hook_content
-    assert str(data_dir) in hook_content
+    # Check that the path is shell-escaped (shlex.quote uses single quotes)
+    escaped = shlex.quote(str(data_dir))
+    assert f"--data-dir {escaped}" in hook_content
 
 
 def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monkeypatch, tmp_path):

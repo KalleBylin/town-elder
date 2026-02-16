@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from town_elder.cli_services import (
     CLIServiceContext,
     ServiceInitError,
     _escape_rich,
+    _is_empty_repo_error,
     console,
     error_console,
     get_cli_services,
@@ -466,14 +468,15 @@ def init(  # noqa: PLR0912
                 else:
                     # Use a fallback chain: uv run te -> te -> python -m town_elder
                     # This ensures the hook works even if uv is not installed
-                    # Properly quote path to handle spaces
+                    # Shell-escape the data_dir to prevent injection
+                    escaped_data_dir = shlex.quote(str(data_dir))
                     hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 # Try uv first, then te, then python -m town_elder
 
-command -v uv >/dev/null 2>&1 && uv run te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-command -v te >/dev/null 2>&1 && te --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-python -m town_elder --data-dir "{data_dir}" commit-index --repo "$(git rev-parse --show-toplevel)"
+command -v uv >/dev/null 2>&1 && uv run te --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+command -v te >/dev/null 2>&1 && te --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+python -m town_elder --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)"
 """
                     hook_path.write_text(hook_content)
                     os.chmod(hook_path, 0o755)
@@ -775,12 +778,15 @@ def commit_index(  # noqa: PLR0912, PLR0913
         # Get commits using batch mode (with files in single call)
         initial_commits = git.get_commits_with_files_batch(limit=initial_limit)
     except subprocess.CalledProcessError as e:
-        # Check for empty repository (exit code 128 typically means no commits or fatal error)
-        if e.returncode == 128:
+        # Check for empty repository (exit code 128 can mean no commits OR fatal error)
+        # We must check the error message to distinguish between them
+        error_msg = e.stderr.strip() if e.stderr else ""
+        if e.returncode == 128 and _is_empty_repo_error(error_msg):
             console.print("[yellow]No commits to index.[/yellow]")
             store.close()
             raise typer.Exit(code=0)
-        console.print(f"[red]Error fetching commits:[/red] {_escape_rich(str(e))}")
+        # Fatal error - not an empty repo but a real git error
+        console.print(f"[red]Error fetching commits:[/red] {_escape_rich(error_msg or str(e))}")
         store.close()
         raise typer.Exit(code=EXIT_ERROR)
     except Exception as e:
@@ -1010,9 +1016,10 @@ def install(
     # Determine the data_dir to use in the hook - use absolute path for reliability
     # Use a fallback chain: uv run te -> te -> python -m town_elder
     # This ensures the hook works even if uv is not installed
-    # Properly quote paths to handle spaces
+    # Shell-escape the data_dir to prevent injection
     if data_dir:
-        data_dir_arg = f'--data-dir "{config.data_dir}"'
+        escaped_data_dir = shlex.quote(str(config.data_dir))
+        data_dir_arg = f'--data-dir {escaped_data_dir}'
         hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 # Try uv first, then te, then python -m town_elder
