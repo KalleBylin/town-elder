@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -39,69 +40,71 @@ class ZvecStore:
         self.path = Path(path)
         self.dimension = dimension
         self._collection = None
+        self._lock = threading.Lock()
 
     def _get_collection(self):
         """Get or create the zvec collection."""
-        if self._collection is None:
-            try:
-                import zvec
-                from zvec import DataType, FieldSchema, VectorSchema
+        with self._lock:
+            if self._collection is None:
+                try:
+                    import zvec
+                    from zvec import DataType, FieldSchema, VectorSchema
 
-                path_str = str(self.path)
+                    path_str = str(self.path)
 
-                # First, check if the collection directory exists
-                collection_exists = self.path.exists() and any(self.path.iterdir()) if self.path.exists() else False
+                    # First, check if the collection directory exists
+                    collection_exists = self.path.exists() and any(self.path.iterdir()) if self.path.exists() else False
 
-                if collection_exists:
-                    # Collection directory exists - try to open it
-                    # If this fails, it's likely corruption/schema mismatch/permission issue
-                    try:
-                        self._collection = zvec.open(path=path_str)
-                    except Exception as e:
-                        error_msg = str(e).lower()
-                        # Differentiate between fatal errors and "not found"
-                        if "not found" in error_msg or "does not exist" in error_msg:
-                            # Collection directory exists but not a valid zvec collection - create new
-                            pass  # Fall through to create
-                        else:
-                            # Fatal error - corruption, schema mismatch, or permission issue
-                            raise VectorStoreError(
-                                f"Failed to open zvec collection at {self.path}: {e}\n"
-                                "This may indicate corruption, schema mismatch, or permission issues.\n"
-                                "If the collection is corrupted, you may need to reinitialize the database."
-                            )
-                else:
-                    # Collection doesn't exist - create new one
-                    pass
+                    if collection_exists:
+                        # Collection directory exists - try to open it
+                        # If this fails, it's likely corruption/schema mismatch/permission issue
+                        try:
+                            self._collection = zvec.open(path=path_str)
+                        except Exception as e:
+                            error_msg = str(e).lower()
+                            # Differentiate between fatal errors and "not found"
+                            if "not found" in error_msg or "does not exist" in error_msg:
+                                # Collection directory exists but not a valid zvec collection - create new
+                                pass  # Fall through to create
+                            else:
+                                # Fatal error - corruption, schema mismatch, or permission issue
+                                raise VectorStoreError(
+                                    f"Failed to open zvec collection at {self.path}: {e}\n"
+                                    "This may indicate corruption, schema mismatch, or permission issues.\n"
+                                    "If the collection is corrupted, you may need to reinitialize the database."
+                                )
+                    else:
+                        # Collection doesn't exist - create new one
+                        pass
 
-                # Create new collection if needed
-                if self._collection is None:
-                    text_field = FieldSchema("text", DataType.STRING)
-                    metadata_field = FieldSchema("metadata", DataType.STRING)
-                    emb_vector = VectorSchema(
-                        "embedding",
-                        dimension=self.dimension,
-                        data_type=DataType.VECTOR_FP32,
+                    # Create new collection if needed
+                    if self._collection is None:
+                        text_field = FieldSchema("text", DataType.STRING)
+                        metadata_field = FieldSchema("metadata", DataType.STRING)
+                        emb_vector = VectorSchema(
+                            "embedding",
+                            dimension=self.dimension,
+                            data_type=DataType.VECTOR_FP32,
+                        )
+
+                        schema = zvec.CollectionSchema(
+                            name="town_elder",
+                            fields=[text_field, metadata_field],
+                            vectors=emb_vector,
+                        )
+
+                        self._collection = zvec.create_and_open(
+                            path=path_str, schema=schema
+                        )
+                except ImportError:
+                    raise VectorStoreError("zvec not installed. Run: pip install zvec")
+                except VectorStoreError:
+                    raise  # Re-raise our own VectorStoreError
+                except Exception as e:
+                    raise VectorStoreError(
+                        f"Failed to open or create zvec collection: {e}\n"
+                        "If this is a permission error, check that you have read/write access to the directory."
                     )
-
-                    schema = zvec.CollectionSchema(
-                        name="town_elder",
-                        fields=[text_field, metadata_field],
-                        vectors=emb_vector,
-                    )
-
-                    self._collection = zvec.create_and_open(
-                        path=path_str, schema=schema
-                    )
-            except ImportError:
-                raise VectorStoreError("zvec not installed. Run: pip install zvec")
-            except VectorStoreError:
-                raise  # Re-raise our own VectorStoreError
-            except Exception as e:
-                raise VectorStoreError(
-                    f"Failed to open or create zvec collection: {e}\n"
-                    "If this is a permission error, check that you have read/write access to the directory."
-                )
 
         return self._collection
 
@@ -136,8 +139,6 @@ class ZvecStore:
 
     def search(self, query_vector: np.ndarray, top_k: int = 5) -> list[dict[str, Any]]:
         """Search for similar documents using cosine similarity."""
-        import json
-
         import zvec
         collection = self._get_collection()
 
@@ -162,7 +163,6 @@ class ZvecStore:
 
     def get(self, doc_id: str) -> dict[str, Any] | None:
         """Get a document by ID."""
-        import json
         collection = self._get_collection()
         # Use fetch to get by ID - returns a dict, not a list
         docs = collection.fetch(ids=[doc_id])
@@ -200,9 +200,6 @@ class ZvecStore:
         Returns:
             List of documents with id, text, metadata, and optionally vectors.
         """
-        import json
-
-
         collection = self._get_collection()
 
         # Query all documents without a vector (empty filter matches all)
