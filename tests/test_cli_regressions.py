@@ -76,6 +76,90 @@ def test_status_alias_executes_via_shared_helper(monkeypatch):
     assert calls["count"] == 1
 
 
+def test_index_commits_alias_executes_via_shared_helper(monkeypatch):
+    """`te index-commits` should dispatch through the shared commit-index helper."""
+    calls: list[tuple] = []
+    repo_path = "repo-path"
+
+    def fake_run_commit_index(*args) -> None:
+        _, path, limit, all_history, batch_size, max_diff_size, incremental, force = args
+        calls.append((path, limit, all_history, batch_size, max_diff_size, incremental, force))
+
+    monkeypatch.setattr(cli, "_run_commit_index", fake_run_commit_index)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "index-commits",
+            "--repo",
+            repo_path,
+            "--limit",
+            "7",
+            "--all",
+            "--batch-size",
+            "11",
+            "--max-diff-size",
+            "2048",
+            "--mode",
+            "full",
+            "--force",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [(repo_path, 7, True, 11, 2048, False, True)]
+
+
+def test_commit_index_executes_via_shared_helper(monkeypatch):
+    """`te commit-index` should dispatch through the shared commit-index helper."""
+    calls: list[tuple] = []
+    repo_path = "repo-path"
+
+    def fake_run_commit_index(*args) -> None:
+        _, path, limit, all_history, batch_size, max_diff_size, incremental, force = args
+        calls.append((path, limit, all_history, batch_size, max_diff_size, incremental, force))
+
+    monkeypatch.setattr(cli, "_run_commit_index", fake_run_commit_index)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "commit-index",
+            "--repo",
+            repo_path,
+            "--limit",
+            "9",
+            "--all",
+            "--batch-size",
+            "25",
+            "--max-diff-size",
+            "4096",
+            "--full",
+            "--force",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [(repo_path, 9, True, 25, 4096, False, True)]
+
+
+def test_root_help_shows_only_canonical_top_level_commands():
+    """`te --help` should hide legacy aliases from top-level command listing."""
+    result = runner.invoke(cli.app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "search" in result.output
+    assert "stats" in result.output
+    assert "add" in result.output
+    assert "index" in result.output
+    assert "commit-index" in result.output
+
+    # Hidden compatibility aliases should not appear in root help.
+    assert "query" not in result.output
+    assert "status" not in result.output
+    assert "index-commits" not in result.output
+
+
 class _FakeEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Batch embed method used by commit-index."""

@@ -226,10 +226,16 @@ Commands are shown with `uv run te`. You can use `uvx --from town-elder te` equi
 | `uv run te hook uninstall` | Remove post-commit hook |
 | `uv run te hook status` | Check if hook is installed |
 
+Legacy aliases are still accepted for compatibility:
+- `uv run te query` -> `uv run te search`
+- `uv run te status` -> `uv run te stats`
+- `uv run te index-commits` -> `uv run te commit-index`
+
 ### Options
 
 - `--data-dir`, `-d`: Data directory (default: .town_elder in current directory)
-- `--path`, `-p`: Specify directory path (for init, index)
+- `--path`, `-p`: Specify directory path (for init)
+- `index [PATH]`: Positional directory path for file indexing (default: current directory)
 - `--top-k`, `-k`: Number of search results (default: 5)
 - `--limit`, `-n`: Number of commits to index (default: 100)
 - `--repo`, `-r`: Git repository path (for commit-index, hook commands)
