@@ -95,8 +95,8 @@ def _get_common_git_dir(repo_path: Path) -> Path:
         if not git_dir_path.is_absolute():
             git_dir_path = (repo_path / git_dir_path).resolve()
         return git_dir_path
-    except subprocess.CalledProcessError:
-        # Fallback to _get_git_dir if git command fails
+    except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError):
+        # Fallback to _get_git_dir if git command fails or path is invalid
         return _get_git_dir(repo_path)
 
 
