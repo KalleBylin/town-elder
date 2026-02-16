@@ -399,6 +399,55 @@ class TestGitRunnerErrorHandling:
             runner.get_diff("0" * 40)
 
 
+class TestGitRunnerNonUtf8:
+    """Tests for handling non-UTF8 git output."""
+
+    def test_get_diff_with_non_utf8_content(self, temp_git_repo: Path):
+        """get_diff should handle binary/non-UTF8 content without crashing."""
+        runner = GitRunner(repo_path=temp_git_repo)
+
+        # Create a file with non-UTF8 bytes (binary content)
+        binary_content = b"Hello World\x80\x81\x82"  # 0x80-0x82 are invalid UTF-8
+        (temp_git_repo / "binary.bin").write_bytes(binary_content)
+        subprocess.run(["git", "add", "."], cwd=temp_git_repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add binary file"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+
+        commits = runner.get_commits(limit=1)
+        assert len(commits) > 0
+
+        # This should not crash even with non-UTF8 content
+        diff = runner.get_diff(commits[0].hash)
+        assert isinstance(diff, str)
+
+    def test_get_diffs_batch_with_non_utf8_content(self, temp_git_repo: Path):
+        """get_diffs_batch should handle binary/non-UTF8 content without crashing."""
+        runner = GitRunner(repo_path=temp_git_repo)
+
+        # Create a file with non-UTF8 bytes
+        binary_content = b"Test\xff\xfe content"  # 0xFF and 0xFE are invalid UTF-8
+        (temp_git_repo / "binary2.bin").write_bytes(binary_content)
+        subprocess.run(["git", "add", "."], cwd=temp_git_repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add another binary"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+
+        commits = runner.get_commits(limit=1)
+        assert len(commits) > 0
+
+        # This should not crash
+        diffs = runner.get_diffs_batch([commits[0].hash])
+        assert commits[0].hash in diffs
+        assert isinstance(diffs[commits[0].hash], str)
+
+
 class TestGitRunnerEdgeCases:
     """Edge case tests for GitRunner."""
 
