@@ -1021,6 +1021,13 @@ class TestHookNonUtf8:
 
     def test_hook_install_handles_non_utf8_existing_hook(self, temp_git_repo: Path):
         """te hook install should handle non-UTF8 existing hook without crashing."""
+        # Initialize the repo first so .town_elder exists
+        subprocess.run(
+            ["uv", "run", "te", "init", "--path", str(temp_git_repo)],
+            capture_output=True,
+            check=True,
+        )
+
         hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
         hook_path.parent.mkdir(parents=True, exist_ok=True)
         # Write binary content that is not valid UTF-8

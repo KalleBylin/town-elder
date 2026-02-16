@@ -1013,7 +1013,7 @@ def install(
 
     data_dir = _get_data_dir_from_context(ctx)
     try:
-        config = get_config(data_dir=data_dir)
+        config = get_config(data_dir=data_dir, repo_path=repo_path)
     except ConfigError as e:
         error_console.print("[red]Error: Database not initialized[/red]")
         console.print(f"[dim]{e}[/dim]")
