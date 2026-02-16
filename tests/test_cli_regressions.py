@@ -311,6 +311,17 @@ te --data-dir /path/to/data commit-index --repo "$(git rev-parse --show-toplevel
     assert _is_te_hook(content) is True
 
 
+def test_is_te_hook_detects_uvx_from_town_elder():
+    """Hook detection should recognize 'uvx --from town-elder te commit-index'."""
+    from town_elder.cli import _is_te_hook
+
+    content = '''#!/bin/sh
+# Town Elder post-commit hook - automatically indexes commits
+uvx --from town-elder te commit-index --repo "$(git rev-parse --show-toplevel)"
+'''
+    assert _is_te_hook(content) is True
+
+
 def test_is_te_hook_detects_python_m_with_data_dir():
     """Hook detection should recognize 'python -m town_elder --data-dir' hooks."""
     from town_elder.cli import _is_te_hook
@@ -727,10 +738,13 @@ class TestHookExecution:
             hook_path = repo_path / ".git" / "hooks" / "post-commit"
             assert hook_path.exists()
 
-            # Verify the generated hook uses fallback chain: uv -> te -> python -m town_elder
+            # Verify the generated hook uses fallback chain: uv -> uvx -> te -> python -m town_elder
             hook_content = hook_path.read_text()
             assert "uv run te" in hook_content, (
                 f"Hook should use 'uv run te' as primary method. Got: {hook_content}"
+            )
+            assert "uvx --from town-elder te" in hook_content, (
+                "Hook should include uvx fallback for ad-hoc/tool-only usage"
             )
             assert "command -v uv" in hook_content, (
                 "Hook should check for uv availability"

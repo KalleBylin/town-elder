@@ -1,10 +1,12 @@
 """Tests for JSON parsing error handling in vector_store."""
-import json
 
 import numpy as np
-import pytest
 
 from town_elder.storage.vector_store import ZvecStore, _safe_parse_json
+
+EMBEDDING_DIM = 384
+TWO_RESULTS = 2
+THREE_DOCS = 3
 
 
 class TestSafeParseJson:
@@ -61,29 +63,26 @@ class TestCorruptedMetadataHandling:
 
     def test_search_with_corrupted_metadata(self, temp_dir):
         """Test that search handles corrupted metadata gracefully."""
-        store = ZvecStore(path=temp_dir / "test_corrupted.vec", dimension=384)
+        store = ZvecStore(path=temp_dir / "test_corrupted.vec", dimension=EMBEDDING_DIM)
 
         # Insert a document with valid metadata first
-        vector = np.zeros(384, dtype=np.float32)
+        vector = np.zeros(EMBEDDING_DIM, dtype=np.float32)
         vector[0] = 1.0
         store.insert("doc1", vector, "test text", {"source": "test"})
 
         # Manually corrupt the metadata by directly writing to the store
         # This simulates a scenario where metadata becomes corrupted
-        # We need to access the internal collection to do this
-        collection = store._get_collection()
-
         # Insert another document, then we'll corrupt it
-        vector2 = np.zeros(384, dtype=np.float32)
+        vector2 = np.zeros(EMBEDDING_DIM, dtype=np.float32)
         vector2[1] = 1.0
         store.insert("doc2", vector2, "test text 2", {"source": "test2"})
 
         # Now manually corrupt the metadata field in doc2
         # We can't easily corrupt it through the API, so we'll test the function directly
         # Instead, let's verify that _safe_parse_json is used in search results
-        results = store.search(vector, top_k=2)
+        results = store.search(vector, top_k=TWO_RESULTS)
 
-        assert len(results) == 2
+        assert len(results) == TWO_RESULTS
         for result in results:
             assert isinstance(result["metadata"], dict)
 
@@ -91,10 +90,10 @@ class TestCorruptedMetadataHandling:
 
     def test_get_with_corrupted_metadata(self, temp_dir):
         """Test that get handles corrupted metadata gracefully."""
-        store = ZvecStore(path=temp_dir / "test_get_corrupted.vec", dimension=384)
+        store = ZvecStore(path=temp_dir / "test_get_corrupted.vec", dimension=EMBEDDING_DIM)
 
         # Insert a document
-        vector = np.zeros(384, dtype=np.float32)
+        vector = np.zeros(EMBEDDING_DIM, dtype=np.float32)
         vector[0] = 1.0
         doc_id = store.insert("doc1", vector, "test text", {"source": "test"})
 
@@ -113,17 +112,17 @@ class TestCorruptedMetadataHandling:
 
     def test_get_all_with_corrupted_metadata(self, temp_dir):
         """Test that get_all handles corrupted metadata gracefully."""
-        store = ZvecStore(path=temp_dir / "test_getall.vec", dimension=384)
+        store = ZvecStore(path=temp_dir / "test_getall.vec", dimension=EMBEDDING_DIM)
 
         # Insert multiple documents
-        for i in range(3):
-            vector = np.zeros(384, dtype=np.float32)
+        for i in range(THREE_DOCS):
+            vector = np.zeros(EMBEDDING_DIM, dtype=np.float32)
             vector[i] = 1.0
             store.insert(f"doc{i}", vector, f"test text {i}", {"index": i})
 
         # Get all documents
         docs = store.get_all()
-        assert len(docs) == 3
+        assert len(docs) == THREE_DOCS
         for doc in docs:
             assert isinstance(doc["metadata"], dict)
 
@@ -131,10 +130,10 @@ class TestCorruptedMetadataHandling:
 
     def test_get_all_with_vectors(self, temp_dir):
         """Test get_all with include_vectors=True."""
-        store = ZvecStore(path=temp_dir / "test_getall_vectors.vec", dimension=384)
+        store = ZvecStore(path=temp_dir / "test_getall_vectors.vec", dimension=EMBEDDING_DIM)
 
         # Insert a document
-        vector = np.zeros(384, dtype=np.float32)
+        vector = np.zeros(EMBEDDING_DIM, dtype=np.float32)
         vector[0] = 1.0
         store.insert("doc1", vector, "test text", {"source": "test"})
 
@@ -143,6 +142,6 @@ class TestCorruptedMetadataHandling:
         assert len(docs) == 1
         assert "vector" in docs[0]
         assert isinstance(docs[0]["vector"], list)
-        assert len(docs[0]["vector"]) == 384
+        assert len(docs[0]["vector"]) == EMBEDDING_DIM
 
         store.close()

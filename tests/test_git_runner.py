@@ -471,9 +471,8 @@ class TestGitRunnerDateParsing:
                 if call_count == 1:
                     # Valid commit
                     return original_run_git(args)
-                else:
-                    # Return a commit with invalid date
-                    return "abc123\x1ftest message\x1fTest User\x1finvalid-date\x1e"
+                # Return a commit with invalid date
+                return "abc123\x1ftest message\x1fTest User\x1finvalid-date\x1e"
             return original_run_git(args)
 
         runner._run_git = mock_run_git  # type: ignore[method-assign]

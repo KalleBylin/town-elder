@@ -126,6 +126,7 @@ def _is_te_hook(content: str) -> bool:
     - Extra arguments like --data-dir between te and commit-index
     - python -m town_elder invocation
     - uv run te invocation
+    - uvx --from town-elder te invocation
     - Absolute interpreter paths (e.g., /usr/bin/python or sys.executable)
     - te command invocation
 
@@ -154,10 +155,12 @@ def _is_te_hook(content: str) -> bool:
     # Match patterns for te/town_elder hooks:
     # - te commit-index
     # - uv run te commit-index
+    # - uvx --from town-elder te commit-index
     # - python[3[.x]] -m town_elder commit-index
     # - /absolute/path/python[3[.x]] -m town_elder commit-index
     # - te --data-dir /path commit-index
     # - uv run te --data-dir /path commit-index
+    # - uvx --from town-elder te --data-dir /path commit-index
     # - python[3[.x]] -m town_elder --data-dir /path commit-index
     patterns = [
         # te commit-index (no extra args)
@@ -168,6 +171,10 @@ def _is_te_hook(content: str) -> bool:
         r'\buv\s+run\s+te\s+commit-index\b',
         # uv run te [args...] commit-index (with extra args)
         r'\buv\s+run\s+te\s+\S+.*\s+commit-index\b',
+        # uvx --from town-elder te commit-index (no extra args)
+        r'\buvx\s+--from\s+town-elder\s+te\s+commit-index\b',
+        # uvx --from town-elder te [args...] commit-index (with extra args)
+        r'\buvx\s+--from\s+town-elder\s+te\s+\S+.*\s+commit-index\b',
         # python[3[.x]] -m town_elder commit-index (no extra args)
         # Matches: python -m town_elder, python3 -m town_elder, python3.11 -m town_elder
         r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+commit-index\b',
@@ -584,9 +591,10 @@ def init(  # noqa: PLR0912
                     escaped_data_dir = shlex.quote(str(Path(data_dir).resolve()))
                     hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-# Try uv first, then te, then python -m town_elder
+# Try uv first, then uvx, then te, then python -m town_elder
 
 command -v uv >/dev/null 2>&1 && uv run te --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+command -v uvx >/dev/null 2>&1 && uvx --from town-elder te --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
 command -v te >/dev/null 2>&1 && te --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
 python -m town_elder --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)"
 """
@@ -1145,7 +1153,7 @@ def install(
         raise typer.Exit(code=EXIT_ERROR)
 
     # Determine the data_dir to use in the hook - use absolute path for reliability
-    # Use a fallback chain: uv run te -> te -> python -m town_elder
+    # Use a fallback chain: uv run te -> uvx --from town-elder te -> te -> python -m town_elder
     # This ensures the hook works even if uv is not installed
     # Shell-escape the data_dir to prevent injection
     if data_dir:
@@ -1153,18 +1161,20 @@ def install(
         data_dir_arg = f'--data-dir {escaped_data_dir}'
         hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-# Try uv first, then te, then python -m town_elder
+# Try uv first, then uvx, then te, then python -m town_elder
 
 command -v uv >/dev/null 2>&1 && uv run te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+command -v uvx >/dev/null 2>&1 && uvx --from town-elder te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
 command -v te >/dev/null 2>&1 && te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
 python -m town_elder {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
 """
     else:
         hook_content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-# Try uv first, then te, then python -m town_elder
+# Try uv first, then uvx, then te, then python -m town_elder
 
 command -v uv >/dev/null 2>&1 && uv run te commit-index --repo "$(git rev-parse --show-toplevel)" && exit
+command -v uvx >/dev/null 2>&1 && uvx --from town-elder te commit-index --repo "$(git rev-parse --show-toplevel)" && exit
 command -v te >/dev/null 2>&1 && te commit-index --repo "$(git rev-parse --show-toplevel)" && exit
 python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
 """

@@ -107,10 +107,10 @@ class TestHookInstall:
 
 
 class TestHookLauncherPortability:
-    """Tests for hook launcher portability (uv absent, te/python fallback)."""
+    """Tests for hook launcher portability (uv/uvx/te/python fallback)."""
 
     def test_hook_install_includes_fallback_chain(self, temp_git_repo: Path):
-        """Hook install should generate fallback chain: uv -> te -> python -m town_elder."""
+        """Hook install should generate fallback chain: uv -> uvx -> te -> python -m town_elder."""
         # Initialize with default location
         result = subprocess.run(
             ["uv", "run", "te", "init", "--path", str(temp_git_repo)],
@@ -133,6 +133,8 @@ class TestHookLauncherPortability:
 
         # Check for uv run te
         assert "uv run te" in hook_content
+        # Check for uvx fallback
+        assert "uvx --from town-elder te" in hook_content
         # Check for te fallback
         assert "command -v te >/dev/null 2>&1 && te" in hook_content
         # Check for python -m town_elder fallback
@@ -174,13 +176,14 @@ class TestHookLauncherPortability:
 
         # Check for fallback chain
         assert "uv run te" in hook_content
+        assert "uvx --from town-elder te" in hook_content
         assert "command -v te >/dev/null 2>&1 && te" in hook_content
         assert "python -m town_elder" in hook_content
         # Check for data-dir
         assert "--data-dir" in hook_content
 
     def test_hook_fallback_order_correct(self, temp_git_repo: Path):
-        """Hook should try uv first, then te, then python -m town_elder."""
+        """Hook should try uv first, then uvx, then te, then python -m town_elder."""
         # Initialize
         result = subprocess.run(
             ["uv", "run", "te", "init", "--path", str(temp_git_repo)],
@@ -203,17 +206,19 @@ class TestHookLauncherPortability:
         # Find positions of each command in the hook (search for complete command lines)
         # Use more specific patterns to avoid matching comments
         uv_pos = hook_content.find("&& uv run te commit-index")
+        uvx_pos = hook_content.find("&& uvx --from town-elder te commit-index")
         te_pos = hook_content.find("command -v te >/dev/null 2>&1 && te commit-index")
         # For python, look for the full command since "python" also appears in comments
         python_pos = hook_content.find("python -m town_elder commit-index")
 
         # Verify all commands are present
         assert uv_pos != -1, "uv run te not found in hook"
+        assert uvx_pos != -1, "uvx --from town-elder te not found in hook"
         assert te_pos != -1, "te fallback not found in hook"
         assert python_pos != -1, "python -m town_elder fallback not found in hook"
 
-        # Verify order: uv -> te -> python -m
-        assert uv_pos < te_pos < python_pos, "Fallback order should be: uv -> te -> python -m"
+        # Verify order: uv -> uvx -> te -> python -m
+        assert uv_pos < uvx_pos < te_pos < python_pos, "Fallback order should be: uv -> uvx -> te -> python -m"
 
 
 class TestHookUninstall:
@@ -787,7 +792,8 @@ class TestIndexErrorHandling:
                 text=True,
             )
             assert result.returncode != 0
-            assert "not initialized" in result.stderr.lower()
+            output = f"{result.stdout}\n{result.stderr}".lower()
+            assert "not initialized" in output or "--data-dir does not exist" in output
 
     def test_index_fails_for_nonexistent_path(self, temp_git_repo: Path):
         """te index should fail for nonexistent path."""
@@ -841,7 +847,8 @@ class TestCommitIndexErrorHandling:
                 text=True,
             )
             assert result.returncode != 0
-            assert "not initialized" in result.stderr.lower()
+            output = f"{result.stdout}\n{result.stderr}".lower()
+            assert "not initialized" in output or "--data-dir does not exist" in output
 
     def test_commit_index_fails_for_non_git_repo(self, temp_git_repo: Path):
         """te commit-index should fail for non-git repository."""
@@ -875,7 +882,8 @@ class TestExportErrorHandling:
                 text=True,
             )
             assert result.returncode != 0
-            assert "not initialized" in result.stderr.lower()
+            output = f"{result.stdout}\n{result.stderr}".lower()
+            assert "not initialized" in output or "--data-dir does not exist" in output
 
     def test_export_fails_with_invalid_format(self, temp_git_repo: Path):
         """te export should fail with invalid format."""
@@ -908,7 +916,8 @@ class TestSearchErrorHandling:
                 text=True,
             )
             assert result.returncode != 0
-            assert "not initialized" in result.stderr.lower()
+            output = f"{result.stdout}\n{result.stderr}".lower()
+            assert "not initialized" in output or "--data-dir does not exist" in output
 
     def test_query_fails_when_not_initialized(self):
         """te query should fail when not initialized."""
@@ -919,37 +928,50 @@ class TestSearchErrorHandling:
                 text=True,
             )
             assert result.returncode != 0
-            assert "not initialized" in result.stderr.lower()
+            output = f"{result.stdout}\n{result.stderr}".lower()
+            assert "not initialized" in output or "--data-dir does not exist" in output
 
     def test_search_rejects_zero_top_k(self, temp_git_repo: Path):
         """te search should reject --top-k=0."""
+        data_dir = temp_git_repo / ".town_elder"
+        data_dir.mkdir()
+
         result = subprocess.run(
-            ["uv", "run", "te", "--data-dir", str(temp_git_repo / ".town_elder"), "search", "test", "--top-k", "0"],
+            ["uv", "run", "te", "--data-dir", str(data_dir), "search", "test", "--top-k", "0"],
             capture_output=True,
             text=True,
         )
         assert result.returncode != 0
-        assert "positive integer" in result.stdout.lower()
+        output = f"{result.stdout}\n{result.stderr}".lower()
+        assert "positive integer" in output
 
     def test_search_rejects_negative_top_k(self, temp_git_repo: Path):
         """te search should reject negative --top-k values."""
+        data_dir = temp_git_repo / ".town_elder"
+        data_dir.mkdir()
+
         result = subprocess.run(
-            ["uv", "run", "te", "--data-dir", str(temp_git_repo / ".town_elder"), "search", "test", "--top-k", "-1"],
+            ["uv", "run", "te", "--data-dir", str(data_dir), "search", "test", "--top-k", "-1"],
             capture_output=True,
             text=True,
         )
         assert result.returncode != 0
-        assert "positive integer" in result.stdout.lower()
+        output = f"{result.stdout}\n{result.stderr}".lower()
+        assert "positive integer" in output
 
     def test_query_rejects_zero_top_k(self, temp_git_repo: Path):
         """te query should reject --top-k=0."""
+        data_dir = temp_git_repo / ".town_elder"
+        data_dir.mkdir()
+
         result = subprocess.run(
-            ["uv", "run", "te", "--data-dir", str(temp_git_repo / ".town_elder"), "query", "test", "--top-k", "0"],
+            ["uv", "run", "te", "--data-dir", str(data_dir), "query", "test", "--top-k", "0"],
             capture_output=True,
             text=True,
         )
         assert result.returncode != 0
-        assert "positive integer" in result.stdout.lower()
+        output = f"{result.stdout}\n{result.stderr}".lower()
+        assert "positive integer" in output
 
 
 class TestHookStatus:
@@ -1085,7 +1107,8 @@ class TestAddErrorHandling:
                 text=True,
             )
             assert result.returncode != 0
-            assert "not initialized" in result.stderr.lower()
+            output = f"{result.stdout}\n{result.stderr}".lower()
+            assert "not initialized" in output or "--data-dir does not exist" in output
 
     def test_add_requires_text_option(self, temp_git_repo: Path):
         """te add should require --text option."""

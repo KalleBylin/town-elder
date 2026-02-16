@@ -1,16 +1,24 @@
 # Town Elder
 
-Local-first semantic memory for AI coding agents. Index your codebase and git history for intelligent search.
+Town Elder is a local-first semantic memory CLI for AI coding agents.
 
-## Value Invariant
+Like a town elder, it helps your tools remember what your project has already learned and why past decisions were made.
 
-Town Elder is only valuable if it reliably provides all three outcomes below:
+It helps you recover project context when exact keywords are unknown:
 
-1. Fast local memory for ad-hoc context retrieval (`add`/`search`) without external services.
-2. Semantic commit-history recall (`commit-index`/`search`) to recover the "why" behind changes.
-3. Safe multi-repo operation (data-dir isolation, predictable hooks, and trustworthy exports/errors).
+- Index source files and notes (`index`, `add`)
+- Index commit messages and diffs (`commit-index`)
+- Search everything with natural language (`search`)
 
-Any change that weakens one of these outcomes is a regression and should be treated as a release blocker.
+Town Elder runs locally and stores project memory in `.town_elder`, so you can query context without relying on an external retrieval service. It uses `zvec` as an embedded vector database, which means there is no separate vector DB server to deploy or operate.
+
+## Core Value
+
+Town Elder is useful when it reliably delivers these outcomes:
+
+1. Find likely code and notes quickly when you do not know exact names or paths.
+2. Recover intent from git history by searching commit messages and diffs semantically.
+3. Get local semantic search powered by embedded `zvec`, with explicit data-dir control for predictable multi-repo use.
 
 ## Quick Start
 
@@ -25,77 +33,71 @@ uv run te index
 uv run te search "authentication logic"
 ```
 
+Output example:
+
+```text
+Search results for: authentication logic
+
+1. Score: 0.912
+   src/auth/session.py
+   validate_token() checks token expiration and issuer before loading user context.
+
+2. Score: 0.857
+   Commit: tighten auth retry flow for expired refresh tokens
+```
+
+Ad-hoc usage (no dependency setup in the current project, for example a Poetry repo):
+
+```bash
+uvx --from town-elder te init
+uvx --from town-elder te search "authentication logic"
+```
+
 ## How To Use This Day-To-Day
 
-Town Elder is not a replacement for `grep` or raw `git` commands.
-It is a semantic recall layer you use before exact tools.
+Use Town Elder as your semantic first pass, then use exact tools to confirm and implement.
 
-### When to use Town Elder vs `grep`/`git`
+### Decision Rule
 
-- Use **Town Elder** first when you do not know exact keywords, symbol names, or commit hashes.
-  - Examples: "why was retry logic changed?", "what fixed the stale state bug?", "where do we handle not-initialized UX errors?"
-- Use **`rg` and `git`** after Town Elder finds likely targets.
-  - Examples: open exact lines, inspect specific diffs, edit code, run tests.
+- Start with **Town Elder** when you do not know exact keywords, symbol names, or commit hashes.
+- Switch to **`rg` and `git`** after Town Elder identifies likely files and commits.
 
-### Recommended Agent Workflow
+### Typical Workflow
 
-1. Initialize (optionally isolated data dir for experiments):
+1. From your repo root, initialize once:
 ```bash
-uv run te --data-dir /tmp/te-session init --path /path/to/repo
+uv run te init
 ```
-2. Build memory from current code + history:
+2. Build memory from code and commit history:
 ```bash
-uv run te --data-dir /tmp/te-session index /path/to/repo
-uv run te --data-dir /tmp/te-session commit-index --repo /path/to/repo --limit 200
+uv run te index
+uv run te commit-index --limit 200
 ```
 3. Ask intent-level questions:
 ```bash
-uv run te --data-dir /tmp/te-session search "data-dir leakage across CLI invocations"
-uv run te --data-dir /tmp/te-session search "last indexed commit not found stale state"
+uv run te search "data-dir leakage across CLI invocations"
+uv run te search "last indexed commit not found stale state"
 ```
-4. Pivot to exact tools to implement changes:
+4. Confirm and implement with exact tools:
 ```bash
 rg -n "data-dir|sentinel|last_indexed_commit" src tests
 git log --oneline --grep="data-dir leakage"
 git show <commit-hash>
 ```
-5. Save new project knowledge for later runs:
+5. Save new project knowledge for future sessions:
 ```bash
-uv run te --data-dir /tmp/te-session add \
+uv run te add \
   --text "Safety rule: never delete non-Town Elder hooks unless --force" \
   --metadata '{"source":"engineering-note","topic":"hook-safety"}'
 ```
 6. Keep history memory fresh automatically:
 ```bash
-uv run te --data-dir /tmp/te-session hook install --repo /path/to/repo
+uv run te hook install
 ```
 
-### Practical Coding Task Examples
+Use `--data-dir` when you want storage outside the current repo (for example, a temporary isolated session or operations run from another working directory).
 
-1. **Understand a regression before touching code**
-```bash
-uv run te search "friendly error when database is not initialized"
-```
-Then:
-```bash
-rg -n "Database not initialized|ConfigError" src tests
-```
-
-2. **Find historical intent behind a bugfix**
-```bash
-uv run te search "fix incremental backlog loss when last indexed commit missing"
-```
-Then:
-```bash
-git log --oneline --grep="last indexed commit"
-git show <commit-hash>
-```
-
-3. **Capture team rules that are not obvious from code**
-```bash
-uv run te add --text "Do not remove non-TE git hooks unless --force is explicit"
-uv run te search "rule for deleting git hooks"
-```
+Typical questions for `te search`: "why was retry logic changed?", "what fixed the stale state bug?", "where is initialization failure handled?"
 
 ## Installation
 
@@ -113,16 +115,23 @@ cd town-elder
 uv pip install -e .
 ```
 
-## Running with uv
+## Running with uv or uvx
 
-This project uses [uv](https://github.com/astral-sh/uv) for dependency management. All commands should be run with `uv run`:
+This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
+
+- Use `uv run te <command>` when working from a local checkout/environment.
+- Use `uvx --from town-elder te <command>` for one-off usage without changing project dependencies.
 
 ```bash
 # Run Town Elder commands from the project root
 uv run te <command>
 
+# Run without modifying the current project's dependency config
+uvx --from town-elder te <command>
+
 # Operate on a different repository (using --data-dir)
 uv run te --data-dir /path/to/target-repo/.town_elder <command>
+uvx --from town-elder te --data-dir /path/to/target-repo/.town_elder <command>
 ```
 
 For example, to index commits in another repository:
@@ -203,7 +212,7 @@ Commits will now be automatically indexed
 
 ## Commands Reference
 
-All commands use `uv run te`:
+Commands are shown with `uv run te`. You can use `uvx --from town-elder te` equivalently.
 
 | Command | Description |
 |---------|-------------|
@@ -274,13 +283,15 @@ The post-commit hook automatically indexes commits after each `git commit`. For 
 
 **Requirements:**
 1. **Git repository**: Must run in a directory with a `.git` folder
-2. **Python or uv**: The hook uses a fallback chain (`uv` → `te` → `python -m town_elder`)
+2. **Python, uv, or uvx**: The hook uses a fallback chain (`uv run te` → `uvx --from town-elder te` → `te` → `python -m town_elder`)
 3. **Initialized database**: Run `te init` before installing hooks
 
 **Hook fallback chain:**
 ```sh
 # First tries uv
 command -v uv >/dev/null 2>&1 && uv run te commit-index ... && exit
+# Then tries uvx
+command -v uvx >/dev/null 2>&1 && uvx --from town-elder te commit-index ... && exit
 # Then tries te command
 command -v te >/dev/null 2>&1 && te commit-index ... && exit
 # Finally falls back to python module
@@ -293,9 +304,9 @@ python -m town_elder commit-index ...
 |-------|----------|
 | Commits not being indexed | Check hook status: `te hook status` |
 | Hook not found | Install it: `te hook install` |
-| "command not found" errors | Ensure `uv`, `te`, or Python is on your PATH |
+| "command not found" errors | Ensure `uv`, `uvx`, `te`, or Python is on your PATH |
 | Hook runs but nothing happens | Ensure database is initialized: `te init` first |
-| uv not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`, or ensure `te` is on your PATH |
+| uv not found | Install uv, use `uvx --from town-elder te ...`, or ensure `te` is on your PATH |
 
 **Verifying hook installation:**
 ```bash
