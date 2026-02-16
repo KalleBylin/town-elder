@@ -230,13 +230,13 @@ All commands use `uv run te`:
 
 ## Configuration
 
-Town Elder stores configuration and data in a `.town_elder` directory in your project:
+Town Elder stores data in a `.town_elder` directory in your project:
 
 ```
 your-project/
 ├── .town_elder/
-│   ├── vectors/      # Vector database files
-│   └── config.json   # Configuration
+│   ├── vectors/         # Vector database files
+│   └── index_state.json # Index state for incremental updates
 └── .git/
 ```
 
