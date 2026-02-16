@@ -33,6 +33,44 @@ def _escape_rich(text: str) -> str:
     return text.replace("[", "\\[").replace("]", "\\]")
 
 
+def _is_empty_repo_error(error_msg: str) -> bool:
+    """Check if git error message indicates an empty repository (not a fatal error).
+
+    Git uses exit code 128 for both empty repositories and fatal errors.
+    This function distinguishes between them by checking the error message.
+
+    Returns True for empty repository, False for fatal errors (not a git repo, corrupt, etc.)
+    """
+    # Empty repository errors - these are safe to treat as "no commits"
+    empty_repo_patterns = [
+        "your branch has no commits yet",
+        "bad object HEAD",  # Empty repo with no commits
+        "does not have any commits",  # Another empty repo variant
+    ]
+    # Fatal errors that should not be masked - these indicate real problems
+    fatal_error_patterns = [
+        "not a git repository",
+        "fatal: repository ",
+        "corrupt repository",
+        "could not read",
+        "unable to read",
+    ]
+
+    # Check for fatal errors first - if any match, it's not an empty repo
+    for pattern in fatal_error_patterns:
+        if pattern.lower() in error_msg.lower():
+            return False
+
+    # Check for empty repo patterns
+    for pattern in empty_repo_patterns:
+        if pattern.lower() in error_msg.lower():
+            return True
+
+    # If we can't determine, be conservative and treat as fatal error
+    # (don't mask as "no commits" if we're not sure)
+    return False
+
+
 class CLIContext:
     """Invocation-scoped context for CLI state.
 
