@@ -13,9 +13,15 @@ def _safe_parse_json(json_str: str) -> dict:
 
     This handles corrupted metadata in the vector store gracefully.
     """
+    if not json_str:
+        return {}
     try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
+        result = json.loads(json_str)
+        # Return empty dict if result is not a dict (e.g., array, string, number)
+        if not isinstance(result, dict):
+            return {}
+        return result
+    except (json.JSONDecodeError, TypeError):
         return {}
 
 
