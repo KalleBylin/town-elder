@@ -6,8 +6,8 @@ Like a town elder, it helps your tools remember what your project has already le
 
 It helps you recover project context when exact keywords are unknown:
 
-- Index source files and notes (`index`, `add`)
-- Index commit messages and diffs (`commit-index`)
+- Index source files and notes (`index files`, `add`)
+- Index commit messages and diffs (`index commits`)
 - Search everything with natural language (`search`)
 
 Town Elder runs locally and stores project memory in `.town_elder`, so you can query context without relying on an external retrieval service. It uses `zvec` as an embedded vector database, which means there is no separate vector DB server to deploy or operate.
@@ -27,7 +27,7 @@ Town Elder is useful when it reliably delivers these outcomes:
 uv run te init
 
 # Index your code files
-uv run te index
+uv run te index files
 
 # Search semantically
 uv run te search "authentication logic"
@@ -70,8 +70,8 @@ uv run te init
 ```
 2. Build memory from code and commit history:
 ```bash
-uv run te index
-uv run te commit-index --limit 200
+uv run te index files
+uv run te index commits --limit 200
 ```
 3. Ask intent-level questions:
 ```bash
@@ -138,7 +138,7 @@ For example, to index commits in another repository:
 
 ```bash
 uv run te --data-dir /path/to/target-repo/.town_elder init --path /path/to/target-repo
-uv run te --data-dir /path/to/target-repo/.town_elder commit-index --repo /path/to/target-repo
+uv run te --data-dir /path/to/target-repo/.town_elder index commits --repo /path/to/target-repo
 ```
 
 ## Usage
@@ -153,7 +153,7 @@ $ uv run te init
 Initialized Town Elder database at /path/to/project/.town_elder
 
 # Index your codebase (Python and Markdown files)
-$ uv run te index
+$ uv run te index files
 Indexing 42 files...
 Indexed 42 files
 
@@ -185,12 +185,12 @@ $ cd /path/to/existing-project
 $ uv run te init
 
 # Index all commits (last 100 by default)
-$ uv run te commit-index
+$ uv run te index commits
 Indexing 100 commits...
 Indexed 100 commits
 
 # Or limit to a specific number
-$ uv run te commit-index --limit 50
+$ uv run te index commits --limit 50
 
 # Search git history semantically
 $ uv run te search "payment retry bug"
@@ -218,27 +218,22 @@ Commands are shown with `uv run te`. You can use `uvx --from town-elder te` equi
 |---------|-------------|
 | `uv run te init` | Initialize a Town Elder database in the current directory |
 | `uv run te add` | Add a document with optional metadata |
-| `uv run te index` | Index all `.py` and `.md` files in a directory |
+| `uv run te index files` | Index all `.py` and `.md` files in a directory |
 | `uv run te search` | Search indexed documents semantically |
 | `uv run te stats` | Show document count and configuration |
-| `uv run te commit-index` | Index git commits from a repository |
+| `uv run te index commits` | Index git commits from a repository |
 | `uv run te hook install` | Install post-commit hook for automatic indexing |
 | `uv run te hook uninstall` | Remove post-commit hook |
 | `uv run te hook status` | Check if hook is installed |
-
-Legacy aliases are still accepted for compatibility:
-- `uv run te query` -> `uv run te search`
-- `uv run te status` -> `uv run te stats`
-- `uv run te index-commits` -> `uv run te commit-index`
 
 ### Options
 
 - `--data-dir`, `-d`: Data directory (default: .town_elder in current directory)
 - `--path`, `-p`: Specify directory path (for init)
-- `index [PATH]`: Positional directory path for file indexing (default: current directory)
+- `index files [PATH]`: Positional directory path for file indexing (default: current directory)
 - `--top-k`, `-k`: Number of search results (default: 5)
 - `--limit`, `-n`: Number of commits to index (default: 100)
-- `--repo`, `-r`: Git repository path (for commit-index, hook commands)
+- `--repo`, `-r`: Git repository path (for index commits, hook commands)
 - `--force`, `-f`: Overwrite existing data
 - `--text`, `-t`: Text content to add
 - `--metadata`, `-m`: JSON metadata string
@@ -270,7 +265,7 @@ Configuration is managed via environment variables or `pyproject.toml`. See `tow
 On first use, Town Elder downloads an embedding model from HuggingFace. This may take some time depending on your internet connection.
 
 **What to expect:**
-- Initial commands (`te index`, `te search`, `te add`, `te commit-index`) may take 30-60 seconds on first run
+- Initial commands (`te index files`, `te search`, `te add`, `te index commits`) may take 30-60 seconds on first run
 - The model (~100MB) is downloaded once and cached locally
 - Subsequent runs will be fast
 
@@ -295,13 +290,13 @@ The post-commit hook automatically indexes commits after each `git commit`. For 
 **Hook fallback chain:**
 ```sh
 # First tries uv
-command -v uv >/dev/null 2>&1 && uv run te commit-index ... && exit
+command -v uv >/dev/null 2>&1 && uv run te index commits ... && exit
 # Then tries uvx
-command -v uvx >/dev/null 2>&1 && uvx --from town-elder te commit-index ... && exit
+command -v uvx >/dev/null 2>&1 && uvx --from town-elder te index commits ... && exit
 # Then tries te command
-command -v te >/dev/null 2>&1 && te commit-index ... && exit
+command -v te >/dev/null 2>&1 && te index commits ... && exit
 # Finally falls back to python module
-python -m town_elder commit-index ...
+python -m town_elder index commits ...
 ```
 
 **Common issues:**

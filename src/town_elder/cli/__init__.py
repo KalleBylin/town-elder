@@ -42,6 +42,11 @@ app = typer.Typer(
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 
+index_app = typer.Typer(
+    help="Index project files and commit history",
+    no_args_is_help=True,
+)
+
 # Global data directory option - DEPRECATED, use CLIContext instead
 _data_dir: Path | None = None
 GIT_ERROR_EXIT_CODE = 128
@@ -117,10 +122,10 @@ def _get_git_repo_root(repo_path: Path) -> Path | None:
 
 
 def _is_te_hook(content: str) -> bool:
-    """Check if hook content is a Town Elder commit-index hook.
+    """Check if hook content is a Town Elder index commits hook.
 
     Uses robust detection that handles:
-    - Extra arguments like --data-dir between te and commit-index
+    - Extra arguments like --data-dir between te and index commits
     - python -m town_elder invocation
     - uv run te invocation
     - uvx --from town-elder te invocation
@@ -132,7 +137,7 @@ def _is_te_hook(content: str) -> bool:
     import re
 
     # First, filter out quoted strings to avoid false positives like:
-    # echo "te commit-index" -> the string "te commit-index" should not match
+    # echo "te index commits" -> the string "te index commits" should not match
     # We use a simple approach: remove content within single or double quotes
     content_without_strings = re.sub(r'"[^"]*"', '', content)  # Remove double-quoted strings
     content_without_strings = re.sub(r"'[^']*'", '', content_without_strings)  # Remove single-quoted strings
@@ -150,37 +155,37 @@ def _is_te_hook(content: str) -> bool:
     non_comment_content = "\n".join(non_comment_lines)
 
     # Match patterns for te/town_elder hooks:
-    # - te commit-index
-    # - uv run te commit-index
-    # - uvx --from town-elder te commit-index
-    # - python[3[.x]] -m town_elder commit-index
-    # - /absolute/path/python[3[.x]] -m town_elder commit-index
-    # - te --data-dir /path commit-index
-    # - uv run te --data-dir /path commit-index
-    # - uvx --from town-elder te --data-dir /path commit-index
-    # - python[3[.x]] -m town_elder --data-dir /path commit-index
+    # - te index commits
+    # - uv run te index commits
+    # - uvx --from town-elder te index commits
+    # - python[3[.x]] -m town_elder index commits
+    # - /absolute/path/python[3[.x]] -m town_elder index commits
+    # - te --data-dir /path index commits
+    # - uv run te --data-dir /path index commits
+    # - uvx --from town-elder te --data-dir /path index commits
+    # - python[3[.x]] -m town_elder --data-dir /path index commits
     patterns = [
-        # te commit-index (no extra args)
-        r'\bte\s+commit-index\b',
-        # te [args...] commit-index (with extra args)
-        r'\bte\s+\S+.*\s+commit-index\b',
-        # uv run te commit-index (no extra args)
-        r'\buv\s+run\s+te\s+commit-index\b',
-        # uv run te [args...] commit-index (with extra args)
-        r'\buv\s+run\s+te\s+\S+.*\s+commit-index\b',
-        # uvx --from town-elder te commit-index (no extra args)
-        r'\buvx\s+--from\s+town-elder\s+te\s+commit-index\b',
-        # uvx --from town-elder te [args...] commit-index (with extra args)
-        r'\buvx\s+--from\s+town-elder\s+te\s+\S+.*\s+commit-index\b',
-        # python[3[.x]] -m town_elder commit-index (no extra args)
+        # te index commits (no extra args)
+        r'\bte\s+index\s+commits\b',
+        # te [args...] index commits (with extra args)
+        r'\bte\s+\S+.*\s+index\s+commits\b',
+        # uv run te index commits (no extra args)
+        r'\buv\s+run\s+te\s+index\s+commits\b',
+        # uv run te [args...] index commits (with extra args)
+        r'\buv\s+run\s+te\s+\S+.*\s+index\s+commits\b',
+        # uvx --from town-elder te index commits (no extra args)
+        r'\buvx\s+--from\s+town-elder\s+te\s+index\s+commits\b',
+        # uvx --from town-elder te [args...] index commits (with extra args)
+        r'\buvx\s+--from\s+town-elder\s+te\s+\S+.*\s+index\s+commits\b',
+        # python[3[.x]] -m town_elder index commits (no extra args)
         # Matches: python -m town_elder, python3 -m town_elder, python3.11 -m town_elder
-        r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+commit-index\b',
-        # python[3[.x]] -m town_elder [args...] commit-index (with extra args)
-        r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
-        # /absolute/path/python[3[.x]] -m town_elder commit-index (no extra args)
-        r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+commit-index\b',
-        # /absolute/path/python[3[.x]] -m town_elder [args...] commit-index (with extra args)
-        r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
+        r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+index\s+commits\b',
+        # python[3[.x]] -m town_elder [args...] index commits (with extra args)
+        r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+index\s+commits\b',
+        # /absolute/path/python[3[.x]] -m town_elder index commits (no extra args)
+        r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+index\s+commits\b',
+        # /absolute/path/python[3[.x]] -m town_elder [args...] index commits (with extra args)
+        r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+index\s+commits\b',
     ]
 
     return any(re.search(pattern, non_comment_content) for pattern in patterns)
@@ -197,6 +202,19 @@ def _safe_read_hook(hook_path: Path) -> str | None:
         return hook_path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         return None
+
+
+def _build_post_commit_hook_content(data_dir_arg: str) -> str:
+    """Build a post-commit hook that indexes commit history."""
+    return f"""#!/bin/sh
+# Town Elder post-commit hook - automatically indexes commits
+# Try uv first, then uvx, then te, then python -m town_elder
+
+command -v uv >/dev/null 2>&1 && uv run te {data_dir_arg} index commits --repo "$(git rev-parse --show-toplevel)" && exit
+command -v uvx >/dev/null 2>&1 && uvx --from town-elder te {data_dir_arg} index commits --repo "$(git rev-parse --show-toplevel)" && exit
+command -v te >/dev/null 2>&1 && te {data_dir_arg} index commits --repo "$(git rev-parse --show-toplevel)" && exit
+python -m town_elder {data_dir_arg} index commits --repo "$(git rev-parse --show-toplevel)"
+"""
 
 
 def set_data_dir(path: Path | str | None) -> None:
@@ -624,15 +642,8 @@ def init(  # noqa: PLR0912
                     # Use absolute path for data_dir to ensure hook works from any directory
                     # Shell-escape the data_dir to prevent injection
                     escaped_data_dir = shlex.quote(str(Path(data_dir).resolve()))
-                    hook_content = f"""#!/bin/sh
-# Town Elder post-commit hook - automatically indexes commits
-# Try uv first, then uvx, then te, then python -m town_elder
-
-command -v uv >/dev/null 2>&1 && uv run te --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-command -v uvx >/dev/null 2>&1 && uvx --from town-elder te --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-command -v te >/dev/null 2>&1 && te --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-python -m town_elder --data-dir {escaped_data_dir} commit-index --repo "$(git rev-parse --show-toplevel)"
-"""
+                    data_dir_arg = f"--data-dir {escaped_data_dir}"
+                    hook_content = _build_post_commit_hook_content(data_dir_arg)
                     hook_path.write_text(hook_content)
                     os.chmod(hook_path, 0o755)
                     console.print(f"[green]Installed post-commit hook at {hook_path}[/green]")
@@ -656,21 +667,6 @@ def search(
     ),
 ) -> None:
     """Search indexed content with semantic similarity."""
-    _run_search(ctx, query=query, top_k=top_k)
-
-
-@app.command("query", hidden=True)
-def query(
-    ctx: typer.Context,
-    query: str = typer.Argument(..., help="Search query text"),
-    top_k: int = typer.Option(
-        5,
-        "--top-k",
-        "-k",
-        help="Number of results to return (default: 5)",
-    ),
-) -> None:
-    """Legacy alias for 'search'."""
     _run_search(ctx, query=query, top_k=top_k)
 
 
@@ -798,14 +794,8 @@ def stats(ctx: typer.Context) -> None:
     _run_stats(ctx)
 
 
-@app.command("status", hidden=True)
-def status(ctx: typer.Context) -> None:
-    """Legacy alias for 'stats'."""
-    _run_stats(ctx)
-
-
-@app.command()
-def index(  # noqa: PLR0912
+@index_app.command("files")
+def index_files(  # noqa: PLR0912
     ctx: typer.Context,
     path: str = typer.Argument(
         ".",
@@ -901,61 +891,6 @@ def index(  # noqa: PLR0912
         console.print(f"[green]Indexed {indexed_count} files, skipped {skipped_count} (excluded {len(excluded_files)})[/green]")
     else:
         console.print(f"[green]Indexed {indexed_count} files (excluded {len(excluded_files)})[/green]")
-
-
-@app.command("index-commits", hidden=True)
-def index_commits(  # noqa: PLR0912, PLR0913
-    ctx: typer.Context,
-    path: str = typer.Option(
-        ".",
-        "--repo",
-        "-r",
-        help="Git repository path (default: current directory)",
-    ),
-    limit: int = typer.Option(
-        100,
-        "--limit",
-        "-n",
-        help="Number of commits to index (default: 100, use --all for full history)",
-    ),
-    all_history: bool = typer.Option(
-        False,
-        "--all",
-        help="Index all commits from git history (ignores --limit)",
-    ),
-    batch_size: int = typer.Option(
-        500,
-        "--batch-size",
-        "-b",
-        help="Number of commits to process per batch (default: 500)",
-    ),
-    max_diff_size: int = typer.Option(
-        100 * 1024,
-        "--max-diff-size",
-        help="Maximum diff size in bytes (default: 102400)",
-    ),
-    mode: str = typer.Option(
-        "incremental",
-        "--mode",
-        "-m",
-        help="Indexing mode: 'incremental' (only new commits) or 'full' (all commits)",
-    ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        "-f",
-        help="Force re-index (in incremental mode: ignores last indexed state)",
-    ),
-) -> None:
-    """Legacy alias for 'commit-index' using a --mode flag."""
-    # Validate mode
-    if mode not in ("incremental", "full"):
-        error_console.print("[red]Error: --mode must be 'incremental' or 'full'[/red]")
-        raise typer.Exit(code=EXIT_INVALID_ARG)
-    incremental = mode == "incremental"
-
-    # Call the main commit_index logic
-    _run_commit_index(ctx, path, limit, all_history, batch_size, max_diff_size, incremental, force)
 
 
 def _run_commit_index(  # noqa: PLR0912, PLR0913
@@ -1209,8 +1144,8 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
         console.print(f"[green]Indexed {indexed_count} commits[/green]")
 
 
-@app.command()
-def commit_index(  # noqa: PLR0912, PLR0913
+@index_app.command("commits")
+def index_commits(  # noqa: PLR0912, PLR0913
     ctx: typer.Context,
     path: str = typer.Option(
         ".",
@@ -1323,15 +1258,7 @@ def install(
     # Always include --data-dir to support env var configuration (TOWN_ELDER_DATA_DIR)
     escaped_data_dir = shlex.quote(str(config.data_dir.resolve()))
     data_dir_arg = f'--data-dir {escaped_data_dir}'
-    hook_content = f"""#!/bin/sh
-# Town Elder post-commit hook - automatically indexes commits
-# Try uv first, then uvx, then te, then python -m town_elder
-
-command -v uv >/dev/null 2>&1 && uv run te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-command -v uvx >/dev/null 2>&1 && uvx --from town-elder te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-command -v te >/dev/null 2>&1 && te {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)" && exit
-python -m town_elder {data_dir_arg} commit-index --repo "$(git rev-parse --show-toplevel)"
-"""
+    hook_content = _build_post_commit_hook_content(data_dir_arg)
 
     hook_path.write_text(hook_content)
 
@@ -1406,6 +1333,7 @@ def hook_status(
         console.print("Hook type: Unknown (not a Town Elder hook)")
 
 
+app.add_typer(index_app, name="index")
 app.add_typer(hook_app, name="hook")
 
 

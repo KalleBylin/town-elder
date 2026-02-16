@@ -1,4 +1,4 @@
-"""Regression tests for CLI alias dispatch and commit-index state safety."""
+"""Regression tests for CLI dispatch and index commits state safety."""
 from __future__ import annotations
 
 import hashlib
@@ -40,44 +40,8 @@ def _get_last_indexed_commit(state_file: Path, repo_path: Path) -> str | None:
     return state.get("repos", {}).get(repo_id, {}).get("last_indexed_commit")
 
 
-def test_query_alias_executes_via_shared_helper(monkeypatch):
-    """`te query` should dispatch through the shared search helper."""
-    calls: list[tuple[str, int]] = []
-
-    def fake_run_search(
-        ctx,
-        query: str,
-        top_k: int,
-    ) -> None:
-        calls.append((query, top_k))
-
-    monkeypatch.setattr(cli, "_run_search", fake_run_search)
-
-    result = runner.invoke(cli.app, ["query", "needle", "--top-k", "3"])
-
-    assert result.exit_code == 0
-    assert "AttributeError" not in result.output
-    assert calls == [("needle", 3)]
-
-
-def test_status_alias_executes_via_shared_helper(monkeypatch):
-    """`te status` should dispatch through the shared stats helper."""
-    calls = {"count": 0}
-
-    def fake_run_stats(ctx) -> None:
-        calls["count"] += 1
-
-    monkeypatch.setattr(cli, "_run_stats", fake_run_stats)
-
-    result = runner.invoke(cli.app, ["status"])
-
-    assert result.exit_code == 0
-    assert "AttributeError" not in result.output
-    assert calls["count"] == 1
-
-
-def test_index_commits_alias_executes_via_shared_helper(monkeypatch):
-    """`te index-commits` should dispatch through the shared commit-index helper."""
+def test_index_commits_executes_via_shared_helper_default_incremental(monkeypatch):
+    """`te index commits` should default to incremental indexing."""
     calls: list[tuple] = []
     repo_path = "repo-path"
 
@@ -90,7 +54,8 @@ def test_index_commits_alias_executes_via_shared_helper(monkeypatch):
     result = runner.invoke(
         cli.app,
         [
-            "index-commits",
+            "index",
+            "commits",
             "--repo",
             repo_path,
             "--limit",
@@ -100,18 +65,16 @@ def test_index_commits_alias_executes_via_shared_helper(monkeypatch):
             "11",
             "--max-diff-size",
             "2048",
-            "--mode",
-            "full",
             "--force",
         ],
     )
 
     assert result.exit_code == 0
-    assert calls == [(repo_path, 7, True, 11, 2048, False, True)]
+    assert calls == [(repo_path, 7, True, 11, 2048, True, True)]
 
 
-def test_commit_index_executes_via_shared_helper(monkeypatch):
-    """`te commit-index` should dispatch through the shared commit-index helper."""
+def test_index_commits_executes_via_shared_helper_full_mode(monkeypatch):
+    """`te index commits --full` should disable incremental mode."""
     calls: list[tuple] = []
     repo_path = "repo-path"
 
@@ -124,7 +87,8 @@ def test_commit_index_executes_via_shared_helper(monkeypatch):
     result = runner.invoke(
         cli.app,
         [
-            "commit-index",
+            "index",
+            "commits",
             "--repo",
             repo_path,
             "--limit",
@@ -143,8 +107,8 @@ def test_commit_index_executes_via_shared_helper(monkeypatch):
     assert calls == [(repo_path, 9, True, 25, 4096, False, True)]
 
 
-def test_root_help_shows_only_canonical_top_level_commands():
-    """`te --help` should hide legacy aliases from top-level command listing."""
+def test_root_help_shows_only_supported_top_level_commands():
+    """`te --help` should not list removed top-level commands."""
     result = runner.invoke(cli.app, ["--help"])
 
     assert result.exit_code == 0
@@ -152,12 +116,21 @@ def test_root_help_shows_only_canonical_top_level_commands():
     assert "stats" in result.output
     assert "add" in result.output
     assert "index" in result.output
-    assert "commit-index" in result.output
 
-    # Hidden compatibility aliases should not appear in root help.
+    # Removed commands should not appear in root help.
     assert "query" not in result.output
     assert "status" not in result.output
+    assert "commit-index" not in result.output
     assert "index-commits" not in result.output
+
+
+def test_index_help_lists_files_and_commits_subcommands():
+    """`te index --help` should list files and commits subcommands."""
+    result = runner.invoke(cli.app, ["index", "--help"])
+
+    assert result.exit_code == 0
+    assert "files" in result.output
+    assert "commits" in result.output
 
 
 def test_get_git_repo_root_finds_parent_repo_from_subdirectory(tmp_path):
@@ -189,7 +162,7 @@ def test_get_common_git_dir_resolves_worktree_commondir(tmp_path):
 
 class _FakeEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Batch embed method used by commit-index."""
+        """Batch embed method used by index commits."""
         return [[0.42] for _ in texts]
 
     def embed_single(self, text: str) -> list[float]:
@@ -308,7 +281,7 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_services, "get_config", fake_get_config)
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
-    first_result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "10"])
+    first_result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"])
     assert first_result.exit_code == 0
 
     state_file = data_dir / "index_state.json"
@@ -316,7 +289,7 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
     assert "c2" not in controller.indexed_hashes
 
     controller.fail_hashes.clear()
-    second_result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "10"])
+    second_result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"])
     assert second_result.exit_code == 0
 
     assert _get_last_indexed_commit(state_file, repo_path) == "c3"
@@ -346,7 +319,7 @@ def test_commit_index_respects_limit_without_all(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_services, "get_config", fake_get_config)
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
-    result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", str(_TEST_LIMIT)])
+    result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", str(_TEST_LIMIT)])
     assert result.exit_code == 0
     assert len(controller.indexed_hashes) == _TEST_LIMIT
 
@@ -379,7 +352,7 @@ def test_commit_index_advances_state_when_sentinel_found_after_pagination(monkey
 
     result = runner.invoke(
         cli.app,
-        ["commit-index", "--repo", str(repo_path), "--limit", "100", "--batch-size", "50"],
+        ["index", "commits", "--repo", str(repo_path), "--limit", "100", "--batch-size", "50"],
     )
     assert result.exit_code == 0
     assert _get_last_indexed_commit(state_file, repo_path) == f"c{total_commits}"
@@ -390,23 +363,23 @@ def test_commit_index_advances_state_when_sentinel_found_after_pagination(monkey
 
 
 def test_is_te_hook_detects_te():
-    """Hook detection should recognize 'te commit-index'."""
+    """Hook detection should recognize 'te index commits'."""
     from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-te commit-index --repo "$(git rev-parse --show-toplevel)"
+te index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is True
 
 
 def test_is_te_hook_detects_python_m_town_elder():
-    """Hook detection should recognize 'python -m town_elder commit-index'."""
+    """Hook detection should recognize 'python -m town_elder index commits'."""
     from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-python -m town_elder commit-index --repo "$(git rev-parse --show-toplevel)"
+python -m town_elder index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is True
 
@@ -417,18 +390,18 @@ def test_is_te_hook_detects_with_data_dir_arg():
 
     content = '''#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-te --data-dir /path/to/data commit-index --repo "$(git rev-parse --show-toplevel)"
+te --data-dir /path/to/data index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is True
 
 
 def test_is_te_hook_detects_uvx_from_town_elder():
-    """Hook detection should recognize 'uvx --from town-elder te commit-index'."""
+    """Hook detection should recognize 'uvx --from town-elder te index commits'."""
     from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-uvx --from town-elder te commit-index --repo "$(git rev-parse --show-toplevel)"
+uvx --from town-elder te index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is True
 
@@ -439,7 +412,7 @@ def test_is_te_hook_detects_python_m_with_data_dir():
 
     content = '''#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-python -m town_elder --data-dir "/path/with spaces/data" commit-index --repo "$(git rev-parse --show-toplevel)"
+python -m town_elder --data-dir "/path/with spaces/data" index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is True
 
@@ -450,17 +423,17 @@ def test_is_te_hook_rejects_non_te_hooks():
 
     content = '''#!/bin/sh
 # Some other hook
-other-tool commit-index --repo "$(git rev-parse --show-toplevel)"
+other-tool index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is False
 
 
 def test_is_te_hook_rejects_partial_matches():
-    """Hook detection should reject partial matches like 'ate commit-index'."""
+    """Hook detection should reject partial matches like 'ate index commits'."""
     from town_elder.cli import _is_te_hook
 
     content = '''#!/bin/sh
-ate commit-index --repo "$(git rev-parse --show-toplevel)"
+ate index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is False
 
@@ -469,12 +442,12 @@ def test_is_te_hook_rejects_comment_text():
     """Hook detection should reject TE patterns in comment text."""
     from town_elder.cli import _is_te_hook
 
-    # This should NOT be detected as a TE hook even though it contains "te commit-index"
+    # This should NOT be detected as a TE hook even though it contains "te index commits"
     # in a comment
     content = '''#!/bin/sh
-# This is a comment about te commit-index
+# This is a comment about te index commits
 echo "Running other hook"
-other-tool commit-index --repo "$(git rev-parse --show-toplevel)"
+other-tool index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is False
 
@@ -486,7 +459,7 @@ def test_is_te_hook_rejects_shebang_in_comment():
     # This SHOULD be detected as a TE hook because the actual command is present
     content = '''#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
-te commit-index --repo "$(git rev-parse --show-toplevel)"
+te index commits --repo "$(git rev-parse --show-toplevel)"
 '''
     assert _is_te_hook(content) is True
 
@@ -494,21 +467,21 @@ te commit-index --repo "$(git rev-parse --show-toplevel)"
 def test_is_te_hook_rejects_quoted_strings():
     """Hook detection should reject hooks that only contain the TE command in a string.
 
-    This is a regression test for the bug where 'echo "te commit-index"' would
+    This is a regression test for the bug where 'echo "te index commits"' would
     incorrectly be detected as a Town Elder hook.
     """
     from town_elder.cli import _is_te_hook
 
     # Non-TE hook with double-quoted string should be rejected
     content = '''#!/bin/sh
-echo "te commit-index"
+echo "te index commits"
 other-tool --run
 '''
     assert _is_te_hook(content) is False
 
     # Non-TE hook with single-quoted string should be rejected
     content = '''#!/bin/sh
-echo 'te commit-index'
+echo 'te index commits'
 other-tool --run
 '''
     assert _is_te_hook(content) is False
@@ -520,8 +493,8 @@ def test_is_te_hook_accepts_quoted_strings_with_actual_command():
 
     # This SHOULD be detected as a TE hook because the actual command is present
     content = '''#!/bin/sh
-echo "te commit-index"
-te commit-index --repo "$(git rev-parse --show-toplevel)"
+echo "te index commits"
+te index commits --repo "$(git rev-parse --show-toplevel)"
 echo "done"
 '''
     assert _is_te_hook(content) is True
@@ -551,7 +524,7 @@ def test_hook_generation_uses_python_m_town_elder(tmp_path):
     hook_content = hook_path.read_text()
     # Hook now uses uv run te for robustness across pyenv/uv environments
     assert "uv run te" in hook_content
-    assert "commit-index" in hook_content
+    assert "index commits" in hook_content
 
 
 def test_hook_generation_quotes_data_dir(tmp_path):
@@ -610,7 +583,7 @@ def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monk
     monkeypatch.setattr(cli_services, "get_config", fake_get_config)
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
-    result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
+    result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"])
 
     assert result.exit_code == 0
     # Should warn about missing sentinel
@@ -653,7 +626,7 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
     # First run: sentinel not found
-    result1 = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
+    result1 = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"])
     assert result1.exit_code == 0
     assert "Warning: Last indexed commit not found" in result1.output
     # State should NOT have advanced (sentinel not found)
@@ -667,7 +640,7 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
     state_file.write_text(json.dumps({"last_indexed_commit": "c1"}))
 
     # Second run: should find c1 and only index newer commits
-    result2 = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "100"])
+    result2 = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"])
     assert result2.exit_code == 0
     assert "Warning" not in result2.output
     # State should have advanced to the newest indexed commit
@@ -718,7 +691,7 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory_a)
 
-    result_a = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_a_path), "--limit", "10"])
+    result_a = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_a_path), "--limit", "10"])
     assert result_a.exit_code == 0
 
     state_file = data_dir / "index_state.json"
@@ -738,7 +711,7 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory_b)
 
-    result_b = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_b_path), "--limit", "10"])
+    result_b = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_b_path), "--limit", "10"])
     assert result_b.exit_code == 0
     # Should NOT have "Warning: Last indexed commit not found" - that's the bug!
     assert "Warning: Last indexed commit not found" not in result_b.output
@@ -783,7 +756,7 @@ def test_commit_index_legacy_migration(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_services, "get_config", fake_get_config)
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
-    result = runner.invoke(cli.app, ["commit-index", "--repo", str(repo_path), "--limit", "10"])
+    result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"])
     assert result.exit_code == 0
 
     # State file should now be in new format (migrated)
@@ -1072,22 +1045,6 @@ class TestConfigErrorHandling:
         assert "Traceback (most recent call last)" not in result.stdout
         assert "Error: Database not initialized" in result.stderr
 
-    def test_query_shows_friendly_error_when_not_initialized(self, tmp_path):
-        """te query should show friendly error, not traceback, when not initialized."""
-        result = self._run_te(tmp_path, "query", "test query")
-
-        assert result.returncode != 0
-        assert "Traceback (most recent call last)" not in result.stderr
-        assert "Error: Database not initialized" in result.stderr
-
-    def test_status_shows_friendly_error_when_not_initialized(self, tmp_path):
-        """te status should show friendly error, not traceback, when not initialized."""
-        result = self._run_te(tmp_path, "status")
-
-        assert result.returncode != 0
-        assert "Traceback (most recent call last)" not in result.stderr
-        assert "Error: Database not initialized" in result.stderr
-
     def test_export_shows_friendly_error_when_not_initialized(self, tmp_path):
         """te export should show friendly error, not traceback, when not initialized."""
         result = self._run_te(tmp_path, "export")
@@ -1182,7 +1139,7 @@ def test_get_config_no_cache_leakage_across_cwd_changes(tmp_path):
 
 
 class TestTopKValidation:
-    """Tests for --top-k parameter validation in search/query commands.
+    """Tests for --top-k parameter validation in search command.
 
     Regression tests for: te-17p
     Previously, negative or zero values for --top-k caused errors.
@@ -1217,38 +1174,6 @@ class TestTopKValidation:
         result = runner.invoke(
             cli.app,
             ["--data-dir", str(data_dir), "search", "test", "--top-k", "-1"],
-        )
-
-        assert result.exit_code != 0
-        assert "positive integer" in result.output.lower()
-
-    def test_query_rejects_zero_top_k(self, tmp_path):
-        """te query should reject --top-k=0 with friendly error."""
-        repo_path = tmp_path / "repo"
-        repo_path.mkdir()
-        (repo_path / ".git").mkdir()
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
-
-        result = runner.invoke(
-            cli.app,
-            ["--data-dir", str(data_dir), "query", "test", "--top-k", "0"],
-        )
-
-        assert result.exit_code != 0
-        assert "positive integer" in result.output.lower()
-
-    def test_query_rejects_negative_top_k(self, tmp_path):
-        """te query should reject negative --top-k values with friendly error."""
-        repo_path = tmp_path / "repo"
-        repo_path.mkdir()
-        (repo_path / ".git").mkdir()
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
-
-        result = runner.invoke(
-            cli.app,
-            ["--data-dir", str(data_dir), "query", "test", "--top-k", "-5"],
         )
 
         assert result.exit_code != 0

@@ -36,8 +36,8 @@ uv run te init
 2. Build semantic memory:
 
 ```bash
-uv run te index
-uv run te commit-index --limit 200
+uv run te index files
+uv run te index commits --limit 200
 ```
 
 3. Ask semantic questions:
@@ -80,7 +80,7 @@ Use `te search` with intent-level prompts, for example:
 3. Implement change only after confirming exact locations.
 
 ### Recover historical rationale
-1. Ensure commit memory exists: `uv run te commit-index` (incremental by default).
+1. Ensure commit memory exists: `uv run te index commits` (incremental by default).
 2. Search rationale: `uv run te search "<why question>"`.
 3. Validate with `git log --oneline` and `git show`.
 
@@ -90,7 +90,7 @@ Use `te search` with intent-level prompts, for example:
 
 ```bash
 uv run te --data-dir /tmp/te-repo-a init --path /path/to/repo-a
-uv run te --data-dir /tmp/te-repo-a commit-index --repo /path/to/repo-a
+uv run te --data-dir /tmp/te-repo-a index commits --repo /path/to/repo-a
 uv run te --data-dir /tmp/te-repo-a search "authentication rollback reason"
 ```
 

@@ -203,13 +203,17 @@ class TestHookLauncherPortability:
         hook_path = temp_git_repo / ".git" / "hooks" / "post-commit"
         hook_content = hook_path.read_text()
 
-        # Find positions of each command in the hook (search for complete command lines)
-        # Use more specific patterns to avoid matching comments
-        uv_pos = hook_content.find("&& uv run te commit-index")
-        uvx_pos = hook_content.find("&& uvx --from town-elder te commit-index")
-        te_pos = hook_content.find("command -v te >/dev/null 2>&1 && te commit-index")
-        # For python, look for the full command since "python" also appears in comments
-        python_pos = hook_content.find("python -m town_elder commit-index")
+        # Find positions of each command in the hook (search for command prefixes).
+        # Hooks always include --data-dir between "te" and "index commits".
+        uv_pos = hook_content.find("command -v uv >/dev/null 2>&1 && uv run te ")
+        uvx_pos = hook_content.find("command -v uvx >/dev/null 2>&1 && uvx --from town-elder te ")
+        te_pos = hook_content.find("command -v te >/dev/null 2>&1 && te ")
+        python_pos = hook_content.find("python -m town_elder ")
+
+        assert "uv run te" in hook_content and "index commits --repo" in hook_content
+        assert "uvx --from town-elder te" in hook_content and "index commits --repo" in hook_content
+        assert "command -v te >/dev/null 2>&1 && te " in hook_content and "index commits --repo" in hook_content
+        assert "python -m town_elder " in hook_content and "index commits --repo" in hook_content
 
         # Verify all commands are present
         assert uv_pos != -1, "uv run te not found in hook"
@@ -784,10 +788,10 @@ class TestIndexErrorHandling:
     """Tests for index command error handling."""
 
     def test_index_fails_when_not_initialized(self):
-        """te index should fail when not initialized."""
+        """te index files should fail when not initialized."""
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(
-                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "index", "."],
+                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "index", "files", "."],
                 capture_output=True,
                 text=True,
             )
@@ -796,7 +800,7 @@ class TestIndexErrorHandling:
             assert "not initialized" in output or "--data-dir does not exist" in output
 
     def test_index_fails_for_nonexistent_path(self, temp_git_repo: Path):
-        """te index should fail for nonexistent path."""
+        """te index files should fail for nonexistent path."""
         data_dir = temp_git_repo / ".town_elder"
 
         subprocess.run(
@@ -806,7 +810,7 @@ class TestIndexErrorHandling:
         )
 
         result = subprocess.run(
-            ["uv", "run", "te", "--data-dir", str(data_dir), "index", "/nonexistent/path"],
+            ["uv", "run", "te", "--data-dir", str(data_dir), "index", "files", "/nonexistent/path"],
             capture_output=True,
             text=True,
         )
@@ -814,7 +818,7 @@ class TestIndexErrorHandling:
         assert "does not exist" in result.stderr or "does not exist" in result.stdout
 
     def test_index_fails_for_file_path(self, temp_git_repo: Path):
-        """te index should fail when given a file path instead of directory."""
+        """te index files should fail when given a file path instead of directory."""
         data_dir = temp_git_repo / ".town_elder"
 
         subprocess.run(
@@ -827,7 +831,7 @@ class TestIndexErrorHandling:
         file_path.write_text("print('hello')")
 
         result = subprocess.run(
-            ["uv", "run", "te", "--data-dir", str(data_dir), "index", str(file_path)],
+            ["uv", "run", "te", "--data-dir", str(data_dir), "index", "files", str(file_path)],
             capture_output=True,
             text=True,
         )
@@ -836,13 +840,13 @@ class TestIndexErrorHandling:
 
 
 class TestCommitIndexErrorHandling:
-    """Tests for commit-index command error handling."""
+    """Tests for index commits command error handling."""
 
     def test_commit_index_fails_when_not_initialized(self):
-        """te commit-index should fail when not initialized."""
+        """te index commits should fail when not initialized."""
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(
-                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "commit-index", "--repo", tmp],
+                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "index", "commits", "--repo", tmp],
                 capture_output=True,
                 text=True,
             )
@@ -851,7 +855,7 @@ class TestCommitIndexErrorHandling:
             assert "not initialized" in output or "--data-dir does not exist" in output
 
     def test_commit_index_fails_for_non_git_repo(self, temp_git_repo: Path):
-        """te commit-index should fail for non-git repository."""
+        """te index commits should fail for non-git repository."""
         # Remove .git directory
         import shutil
         shutil.rmtree(temp_git_repo / ".git")
@@ -862,7 +866,7 @@ class TestCommitIndexErrorHandling:
         data_dir.mkdir()
 
         result = subprocess.run(
-            ["uv", "run", "te", "--data-dir", str(data_dir), "commit-index", "--repo", str(temp_git_repo)],
+            ["uv", "run", "te", "--data-dir", str(data_dir), "index", "commits", "--repo", str(temp_git_repo)],
             capture_output=True,
             text=True,
         )
@@ -905,25 +909,13 @@ class TestExportErrorHandling:
 
 
 class TestSearchErrorHandling:
-    """Tests for search/query command error handling."""
+    """Tests for search command error handling."""
 
     def test_search_fails_when_not_initialized(self):
         """te search should fail when not initialized."""
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(
                 ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "search", "test"],
-                capture_output=True,
-                text=True,
-            )
-            assert result.returncode != 0
-            output = f"{result.stdout}\n{result.stderr}".lower()
-            assert "not initialized" in output or "--data-dir does not exist" in output
-
-    def test_query_fails_when_not_initialized(self):
-        """te query should fail when not initialized."""
-        with tempfile.TemporaryDirectory() as tmp:
-            result = subprocess.run(
-                ["uv", "run", "te", "--data-dir", f"{tmp}/.town_elder", "query", "test"],
                 capture_output=True,
                 text=True,
             )
@@ -952,20 +944,6 @@ class TestSearchErrorHandling:
 
         result = subprocess.run(
             ["uv", "run", "te", "--data-dir", str(data_dir), "search", "test", "--top-k", "-1"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0
-        output = f"{result.stdout}\n{result.stderr}".lower()
-        assert "positive integer" in output
-
-    def test_query_rejects_zero_top_k(self, temp_git_repo: Path):
-        """te query should reject --top-k=0."""
-        data_dir = temp_git_repo / ".town_elder"
-        data_dir.mkdir()
-
-        result = subprocess.run(
-            ["uv", "run", "te", "--data-dir", str(data_dir), "query", "test", "--top-k", "0"],
             capture_output=True,
             text=True,
         )
