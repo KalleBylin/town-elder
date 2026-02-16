@@ -870,7 +870,7 @@ def index_commits(  # noqa: PLR0912, PLR0913
     all_history: bool = typer.Option(
         False,
         "--all",
-        help="Index all commits in history (overrides --limit)",
+        help="Index all commits from git history (ignores --limit)",
     ),
     batch_size: int = typer.Option(
         500,
@@ -893,7 +893,7 @@ def index_commits(  # noqa: PLR0912, PLR0913
         False,
         "--force",
         "-f",
-        help="Force re-indexing of all commits, ignoring last indexed state",
+        help="Force re-index (in incremental mode: ignores last indexed state)",
     ),
 ) -> None:
     """Legacy alias for 'commit-index' using a --mode flag."""
@@ -1176,7 +1176,7 @@ def commit_index(  # noqa: PLR0912, PLR0913
     all_history: bool = typer.Option(
         False,
         "--all",
-        help="Index all commits in history (overrides --limit)",
+        help="Index all commits from git history (ignores --limit)",
     ),
     batch_size: int = typer.Option(
         500,
@@ -1192,13 +1192,13 @@ def commit_index(  # noqa: PLR0912, PLR0913
     incremental: bool = typer.Option(
         True,
         "--incremental/--full",
-        help="Only index new commits since last run (default: incremental)",
+        help="Mode: --incremental (default) checks indexed state, --full re-indexes all",
     ),
     force: bool = typer.Option(
         False,
         "--force",
         "-f",
-        help="Force re-indexing of all commits, ignoring last indexed state",
+        help="Force re-index (in incremental mode: ignores last indexed state)",
     ),
 ) -> None:
     """Index git commits from a repository.
