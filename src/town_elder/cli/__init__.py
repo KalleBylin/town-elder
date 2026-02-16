@@ -864,7 +864,7 @@ def commit_index(  # noqa: PLR0912, PLR0913
                     embeddings = list(embedder.embed(texts))
 
                     # Insert embeddings into store
-                    for (commit, text), vector in zip(commit_data, embeddings):
+                    for (commit, text), vector in zip(commit_data, embeddings, strict=True):
                         try:
                             doc_id = f"commit_{commit.hash}"
                             store.insert(
