@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import shlex
@@ -35,6 +36,7 @@ from town_elder.cli_services import (
 )
 from town_elder.config import get_config as get_config
 from town_elder.indexing.file_scanner import scan_files
+from town_elder.indexing.git_hash_scanner import get_git_root, scan_git_blobs
 
 app = typer.Typer(
     name="te",
@@ -422,6 +424,92 @@ def _save_index_state(
         os.replace(temp_path, state_file)
     except Exception:
         # Clean up temp file on failure
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
+
+
+# File hash state constants
+FILE_HASH_STATE_FILENAME = "file_index_state.json"
+
+
+def _get_file_state_path(data_dir: Path) -> Path:
+    """Get the path to the file hash state file."""
+    return data_dir / FILE_HASH_STATE_FILENAME
+
+
+def _load_file_state(
+    state_file: Path, repo_path: Path
+) -> dict[str, dict[str, str]]:
+    """Load file hash state for incremental file indexing.
+
+    Returns:
+        Dictionary mapping repo_id to dict of file paths to blob hashes.
+        Format: {repo_id: {relative_path: blob_hash, ...}, ...}
+    """
+    if not state_file.exists():
+        return {}
+
+    try:
+        state = json.loads(state_file.read_text())
+    except Exception:
+        return {}
+
+    if not isinstance(state, dict):
+        return {}
+
+    return state
+
+
+def _save_file_state(
+    state_file: Path, repo_path: Path, file_hashes: dict[str, str]
+) -> None:
+    """Save file hash state for incremental file indexing.
+
+    Uses atomic write (temp file + rename) to prevent corruption.
+
+    Args:
+        state_file: Path to the state file.
+        repo_path: Path to the repository (used for repo_id).
+        file_hashes: Dictionary mapping relative file paths to blob hashes.
+    """
+    import os
+    import tempfile
+    from datetime import datetime, timezone
+
+    repo_id = _get_repo_id(repo_path)
+
+    # Load existing state
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text())
+        except Exception:
+            state = {}
+    else:
+        state = {}
+
+    if not isinstance(state, dict):
+        state = {}
+
+    # Update state for this repo
+    state[repo_id] = {
+        "repo_path": str(repo_path.resolve()),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "file_hashes": file_hashes,
+    }
+
+    # Atomic write
+    state_json = json.dumps(state, indent=2)
+    temp_fd, temp_path = tempfile.mkstemp(
+        dir=state_file.parent, prefix=".file_state_", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(temp_fd, "w") as f:
+            f.write(state_json)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, state_file)
+    except Exception:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
         raise
@@ -861,6 +949,11 @@ def index_files(  # noqa: PLR0912
         "-e",
         help="Additional patterns to exclude (can be specified multiple times)",
     ),
+    incremental: bool = typer.Option(
+        True,
+        "--incremental/--no-incremental",
+        help="Enable/disable incremental indexing (skip unchanged files)",
+    ),
 ) -> None:
     """Bulk-index .py, .md, and .rst files from a directory."""
     # Validate path first (before services)
@@ -873,6 +966,42 @@ def index_files(  # noqa: PLR0912
         error_console.print(f"[red]Error: Path is not a directory: {path}[/red]")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
+    # Find the git root to use for blob hash scanning
+    repo_root = get_git_root(index_path)
+    if repo_root is None:
+        error_console.print(
+            "[yellow]Warning: Not a git repository, falling back to non-incremental mode[/yellow]"
+        )
+        incremental = False
+        repo_root = index_path
+    else:
+        # Use index_path as repo_root if it's within the git repo
+        if not index_path.is_relative_to(repo_root):
+            repo_root = index_path
+
+    # Get current tracked files with their blob hashes
+    current_blobs: dict[str, str] = {}
+    if incremental:
+        try:
+            current_blobs = scan_git_blobs(repo_root)
+        except Exception as e:
+            error_console.print(
+                f"[yellow]Warning: Could not scan git blobs, falling back to non-incremental: {e}[/yellow]"
+            )
+            incremental = False
+
+    # Load existing file state for incremental indexing
+    file_state: dict[str, str] = {}
+    config = require_initialized(ctx)
+    data_dir = config.data_dir
+    state_file = _get_file_state_path(data_dir)
+
+    if incremental and state_file.exists():
+        repo_id = _get_repo_id(index_path)
+        all_file_states = _load_file_state(state_file, index_path)
+        repo_state = all_file_states.get(repo_id, {})
+        file_state = repo_state.get("file_hashes", {})
+
     with get_cli_services(ctx) as (svc, embedder, store):
         # Build exclusion patterns (additive to defaults)
         user_excludes = frozenset(exclude) if exclude else None
@@ -881,12 +1010,46 @@ def index_files(  # noqa: PLR0912
         # This includes .py, .md, .rst by default and excludes _build, .git, etc.
         files_to_index = scan_files(index_path, exclude_patterns=user_excludes)
 
-        console.print(f"[green]Indexing {len(files_to_index)} files...[/green]")
+        # Determine which files need indexing
+        files_to_process: list[tuple[Path, str | None]] = []
+        for file in files_to_index:
+            # Get relative path from repo root
+            try:
+                rel_path = file.relative_to(repo_root)
+            except ValueError:
+                # File is outside repo root, use absolute path as string
+                rel_path = file
+
+            rel_path_str = str(rel_path)
+
+            if incremental:
+                # Check if file is tracked in git
+                blob_hash = current_blobs.get(rel_path_str)
+                if blob_hash is None:
+                    # File not in git (might be untracked or in exclusion)
+                    # Skip it for incremental mode
+                    continue
+
+                # Check if hash changed
+                old_hash = file_state.get(rel_path_str)
+                if old_hash == blob_hash:
+                    # File unchanged, skip
+                    continue
+
+            files_to_process.append((file, blob_hash if incremental else None))
+
+        console.print(
+            f"[green]Indexing {len(files_to_process)} files"
+            + (f" (skipped {len(files_to_index) - len(files_to_process)} unchanged)" if incremental else "")
+            + "...[/green]"
+        )
 
         indexed_count = 0
         skipped_count = 0
+        new_file_hashes: dict[str, str] = {}
+
         try:
-            for file in files_to_index:
+            for file, blob_hash in files_to_process:
                 try:
                     # Skip binary or unreadable files
                     if not file.is_file():
@@ -897,10 +1060,23 @@ def index_files(  # noqa: PLR0912
                     # zvec requires alphanumeric doc_ids, so we hash the path
                     file_path_str = str(file)
                     doc_id = hashlib.sha256(file_path_str.encode()).hexdigest()[:16]
+
+                    # Build metadata including blob hash if available
+                    metadata = {"source": str(file), "type": file.suffix}
+                    if blob_hash:
+                        metadata["blob_hash"] = blob_hash
+
                     vector = embedder.embed_single(text)
-                    store.upsert(
-                        doc_id, vector, text, {"source": str(file), "type": file.suffix}
-                    )
+                    store.upsert(doc_id, vector, text, metadata)
+
+                    # Record the hash for state
+                    if blob_hash:
+                        try:
+                            rel_path = file.relative_to(repo_root)
+                            new_file_hashes[str(rel_path)] = blob_hash
+                        except ValueError:
+                            new_file_hashes[str(file)] = blob_hash
+
                     indexed_count += 1
                 except UnicodeDecodeError:
                     skipped_count += 1
@@ -913,6 +1089,24 @@ def index_files(  # noqa: PLR0912
                 except Exception as e:
                     skipped_count += 1
                     error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
+
+            # Handle deletions: files that were in state but are no longer tracked
+            if incremental and file_state:
+                deleted_files = set(file_state.keys()) - set(new_file_hashes.keys())
+                if deleted_files:
+                    # Remove deleted files from vector store
+                    for deleted_path in deleted_files:
+                        # Generate doc_id the same way as when indexing
+                        # Try both relative and absolute path
+                        deleted_doc_id = hashlib.sha256(deleted_path.encode()).hexdigest()[:16]
+                        with contextlib.suppress(Exception):
+                            # File may not exist in store
+                            store.delete(deleted_doc_id)
+
+            # Save updated file state
+            if incremental and new_file_hashes:
+                _save_file_state(state_file, index_path, new_file_hashes)
+
         except Exception as e:
             console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
             raise typer.Exit(code=EXIT_ERROR)
