@@ -865,12 +865,7 @@ def index(  # noqa: PLR0912
         console.print(f"[green]Indexed {indexed_count} files (excluded {len(excluded_files)})[/green]")
 
 
-# Index subcommand group (files and commits)
-index_app = typer.Typer(name="index", help="Index files or commits into the vector store")
-app.add_typer(index_app, name="index")
-
-
-@index_app.command("commits")
+@app.command("index-commits")
 def index_commits(  # noqa: PLR0912, PLR0913
     ctx: typer.Context,
     path: str = typer.Option(
