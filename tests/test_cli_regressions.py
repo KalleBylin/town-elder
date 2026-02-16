@@ -76,6 +76,10 @@ def test_status_alias_executes_via_shared_helper(monkeypatch):
 
 
 class _FakeEmbedder:
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Batch embed method used by commit-index."""
+        return [[0.42] for _ in texts]
+
     def embed_single(self, text: str) -> list[float]:
         _ = text
         return [0.42]
