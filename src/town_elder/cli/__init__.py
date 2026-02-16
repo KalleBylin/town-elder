@@ -57,11 +57,11 @@ def _is_te_hook(content: str) -> bool:
     # Match patterns for te/town_elder hooks:
     # - te commit-index
     # - uv run te commit-index
-    # - python -m town_elder commit-index
-    # - /absolute/path/python -m town_elder commit-index
+    # - python[3[.x]] -m town_elder commit-index
+    # - /absolute/path/python[3[.x]] -m town_elder commit-index
     # - te --data-dir /path commit-index
     # - uv run te --data-dir /path commit-index
-    # - python -m town_elder --data-dir /path commit-index
+    # - python[3[.x]] -m town_elder --data-dir /path commit-index
     patterns = [
         # te commit-index (no extra args)
         r'\bte\s+commit-index\b',
@@ -71,14 +71,15 @@ def _is_te_hook(content: str) -> bool:
         r'\buv\s+run\s+te\s+commit-index\b',
         # uv run te [args...] commit-index (with extra args)
         r'\buv\s+run\s+te\s+\S+.*\s+commit-index\b',
-        # python -m town_elder commit-index (no extra args)
-        r'\bpython\s+-m\s+town_elder\s+commit-index\b',
-        # python -m town_elder [args...] commit-index (with extra args)
-        r'\bpython\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
-        # /absolute/path/python -m town_elder commit-index (no extra args)
-        r'/[^\\s]+/python\s+-m\s+town_elder\s+commit-index\b',
-        # /absolute/path/python -m town_elder [args...] commit-index (with extra args)
-        r'/[^\\s]+/python\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
+        # python[3[.x]] -m town_elder commit-index (no extra args)
+        # Matches: python -m town_elder, python3 -m town_elder, python3.11 -m town_elder
+        r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+commit-index\b',
+        # python[3[.x]] -m town_elder [args...] commit-index (with extra args)
+        r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
+        # /absolute/path/python[3[.x]] -m town_elder commit-index (no extra args)
+        r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+commit-index\b',
+        # /absolute/path/python[3[.x]] -m town_elder [args...] commit-index (with extra args)
+        r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+commit-index\b',
     ]
 
     return any(re.search(pattern, content) for pattern in patterns)
