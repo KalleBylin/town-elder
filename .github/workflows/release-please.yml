@@ -1,0 +1,26 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Create Release PR Or Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        uses: googleapis/release-please-action@v4
+        with:
+          # Use a PAT or GitHub App token so release events can trigger publish.yml.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          release-type: python
+          package-name: town-elder
+          include-v-in-tag: true

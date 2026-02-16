@@ -2,7 +2,9 @@
 name = "town-elder"
 version = "0.1.0"
 description = "A semantic git CLI tool using zvec + fastembed"
-requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Kalle Bylin" }]
+requires-python = ">=3.10,<3.14"
 dependencies = [
     "typer[all]>=0.12.0",
     "zvec>=0.1.0",
@@ -26,11 +28,8 @@ dev = [
 te = "town_elder.cli:run"
 
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["src"]
+requires = ["uv_build>=0.7.21,<0.8.0"]
+build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

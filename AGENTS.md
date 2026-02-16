@@ -43,6 +43,48 @@ pyenv install 3.12    # Install a new version
 uv sync               # Re-sync dependencies
 ```
 
+## Commit Messages (Release Please)
+
+This repository uses **Conventional Commits** so Release Please can determine
+semantic version bumps and changelog entries automatically.
+
+**Required commit subject format:**
+
+```text
+<type>(<optional-scope>)!: <imperative summary>
+```
+
+**Allowed types:**
+
+- `feat` -> minor version bump
+- `fix` -> patch version bump
+- `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore` -> no release bump unless marked breaking
+
+**Breaking changes:**
+
+- Add `!` in the subject (e.g., `feat(cli)!: remove legacy alias`)
+- Include a footer:
+  `BREAKING CHANGE: <what changed and migration guidance>`
+
+**Examples:**
+
+- `feat(cli): add commit export command`
+- `fix(index): handle empty repository state`
+- `feat(api)!: replace search payload format`
+
+**PR merge guidance:**
+
+- If using squash merge, the squash commit message **must** follow Conventional
+  Commits.
+- Keep unrelated changes in separate commits whenever practical.
+
+## Release Automation
+
+- `release-please.yml` monitors `main`, updates changelog/version metadata, and
+  creates `v*` tags + GitHub Releases.
+- `publish.yml` is triggered by published GitHub Releases and performs build,
+  smoke tests, attestations, and PyPI publish via Trusted Publishing.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
@@ -68,4 +110,3 @@ uv sync               # Re-sync dependencies
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
-
