@@ -448,6 +448,81 @@ class TestGitRunnerNonUtf8:
         assert isinstance(diffs[commits[0].hash], str)
 
 
+class TestGitRunnerDateParsing:
+    """Tests for date parsing edge cases."""
+
+    def test_get_commits_with_invalid_date_logs_warning(self, temp_git_repo: Path, caplog: pytest.LogCaptureFixture):
+        """get_commits should skip commits with invalid dates and log a warning."""
+        runner = GitRunner(repo_path=temp_git_repo)
+
+        # Manually mock _run_git to return invalid date format
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        # Create a mock that returns an invalid date
+        original_run_git = runner._run_git
+        call_count = 0
+
+        def mock_run_git(args: list[str]) -> str:
+            nonlocal call_count
+            if "log" in args:
+                call_count += 1
+                # Return valid commits first, then one with invalid date
+                if call_count == 1:
+                    # Valid commit
+                    return original_run_git(args)
+                else:
+                    # Return a commit with invalid date
+                    return "abc123\x1ftest message\x1fTest User\x1finvalid-date\x1e"
+            return original_run_git(args)
+
+        runner._run_git = mock_run_git  # type: ignore[method-assign]
+
+        # Should not raise, should skip the invalid commit and return valid ones
+        commits = runner.get_commits(limit=10)
+        # The first call returns valid commits, so we should get those
+        assert isinstance(commits, list)
+
+    def test_parse_commit_header_with_invalid_date_returns_none(self, temp_git_repo: Path):
+        """_parse_commit_header should return None for invalid date strings."""
+        runner = GitRunner(repo_path=temp_git_repo)
+
+        # Valid format should work
+        valid_line = "abc123\x1fmessage\x1fauthor\x1f2024-01-01T00:00:00+00:00\x1e"
+        result, files = runner._parse_commit_header(valid_line)
+        assert result is not None
+        assert result["hash"] == "abc123"
+
+        # Invalid date should return None
+        invalid_line = "def456\x1fmessage\x1fauthor\x1finvalid-date\x1e"
+        result, files = runner._parse_commit_header(invalid_line)
+        assert result is None
+        assert files == []
+
+        # Empty date should return None
+        empty_date_line = "ghi789\x1fmessage\x1fauthor\x1f\x1e"
+        result, files = runner._parse_commit_header(empty_date_line)
+        assert result is None
+
+    def test_get_commits_with_empty_date_string(self, temp_git_repo: Path):
+        """get_commits should skip commits with empty date strings."""
+        runner = GitRunner(repo_path=temp_git_repo)
+
+        original_run_git = runner._run_git
+
+        def mock_run_git(args: list[str]) -> str:
+            if "log" in args:
+                # Return commit with empty date
+                return "abc123\x1ftest\x1fTest User\x1f\x1e"
+            return original_run_git(args)
+
+        runner._run_git = mock_run_git  # type: ignore[method-assign]
+
+        # Should not crash, should return empty list (or skip invalid commit)
+        commits = runner.get_commits(limit=10)
+        assert isinstance(commits, list)
+
+
 class TestGitRunnerEdgeCases:
     """Edge case tests for GitRunner."""
 

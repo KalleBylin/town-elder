@@ -1,10 +1,13 @@
 """Git runner implementation using subprocess."""
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Minimum parts expected in git log format output
 _MIN_LOG_PARTS = 4
@@ -90,7 +93,11 @@ class GitRunner:
                 commit_hash = commit_hash.strip()
 
                 # Parse the date from git's iso format
-                date = datetime.fromisoformat(date_str)
+                try:
+                    date = datetime.fromisoformat(date_str)
+                except ValueError as e:
+                    logger.warning("Failed to parse date %r for commit %s: %s", date_str, commit_hash, e)
+                    continue
 
                 # Get files changed for this commit
                 files: list[str] = []
@@ -177,12 +184,17 @@ class GitRunner:
         """Parse a git log commit header line."""
         parts = line.rstrip("\n").rstrip(_LOG_RECORD_SEPARATOR).split(_LOG_FIELD_SEPARATOR)
         if len(parts) >= _MIN_LOG_PARTS:
+            try:
+                date = datetime.fromisoformat(parts[3])
+            except ValueError as e:
+                logger.warning("Failed to parse date %r: %s", parts[3], e)
+                return None, []
             return (
                 {
                     "hash": parts[0],
                     "message": parts[1],
                     "author": parts[2],
-                    "date": datetime.fromisoformat(parts[3])
+                    "date": date
                 },
                 []
             )
