@@ -1,10 +1,22 @@
 """Vector store implementation using zvec."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+
+def _safe_parse_json(json_str: str) -> dict:
+    """Parse JSON string, returning empty dict on failure.
+
+    This handles corrupted metadata in the vector store gracefully.
+    """
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        return {}
 
 
 class VectorStoreError(Exception):
@@ -137,7 +149,7 @@ class ZvecStore:
             output.append({
                 "id": result.id,
                 "text": result.fields.get("text", ""),
-                "metadata": json.loads(result.fields.get("metadata", "{}")),
+                "metadata": _safe_parse_json(result.fields.get("metadata", "{}")),
                 "score": result.score,
             })
         return output
@@ -152,7 +164,7 @@ class ZvecStore:
             doc = docs[doc_id]
             return {
                 "text": doc.fields.get("text", ""),
-                "metadata": json.loads(doc.fields.get("metadata", "{}")),
+                "metadata": _safe_parse_json(doc.fields.get("metadata", "{}")),
             }
         return None
 
@@ -203,7 +215,7 @@ class ZvecStore:
             doc = {
                 "id": result.id,
                 "text": result.fields.get("text", ""),
-                "metadata": json.loads(result.fields.get("metadata", "{}")),
+                "metadata": _safe_parse_json(result.fields.get("metadata", "{}")),
             }
             if include_vectors and hasattr(result, "vectors"):
                 doc["vector"] = result.vectors.get("embedding", [])
