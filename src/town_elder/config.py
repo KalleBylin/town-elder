@@ -82,11 +82,18 @@ def get_config(
     resolution depends on the current working directory, which can change
     between invocations within the same process.
     """
+    import os
+
     if clear_cache:
         _get_config_cached.cache_clear()
 
     # Don't cache when data_dir is None since default depends on cwd or repo_path
     if data_dir is None:
+        # Check environment variable first
+        env_data_dir = os.environ.get("TOWN_ELDER_DATA_DIR")
+        if env_data_dir:
+            return TownElderConfig(data_dir=Path(env_data_dir))
+
         base_path = Path(repo_path) if repo_path else None
         return TownElderConfig(data_dir=_get_default_data_dir(base_path))
 
