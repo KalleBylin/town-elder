@@ -124,3 +124,16 @@ class TestSaveFileState:
         # Should have updated hashes
         assert content[repo_id]["file_hashes"]["file1.py"] == "hash2"
         assert content[repo_id]["file_hashes"]["file2.py"] == "hash3"
+
+    def test_saves_file_chunk_counts_when_provided(self, state_file, repo_path):
+        """Should persist optional per-file chunk count metadata."""
+        _save_file_state(
+            state_file,
+            repo_path,
+            {"docs/guide.rst": "hash1"},
+            {"docs/guide.rst": 3},
+        )
+
+        content = json.loads(state_file.read_text())
+        repo_id = _get_repo_id(repo_path)
+        assert content[repo_id]["file_chunks"] == {"docs/guide.rst": 3}

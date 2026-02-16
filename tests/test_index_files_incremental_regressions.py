@@ -204,3 +204,33 @@ def test_index_files_incremental_deletion_uses_absolute_doc_id_and_clears_state(
     saved_state = json.loads(state_file.read_text())
     repo_id = cli._get_repo_id(project)
     assert saved_state[repo_id]["file_hashes"] == {}
+
+
+def test_index_files_incremental_indexes_markdown_files(monkeypatch, tmp_path):
+    """Markdown files should flow through incremental indexing with blob metadata."""
+
+    repo = _init_git_repo_with_file(tmp_path, file_name="README.md")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    store = _RecordingStore(enforce_json_metadata=True)
+    _patch_cli_services(monkeypatch, data_dir, store)
+
+    result = runner.invoke(
+        cli.app,
+        ["--data-dir", str(data_dir), "index", "files", str(repo)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(store.upserts) == 1
+
+    _doc_id, metadata = store.upserts[0]
+    assert metadata["type"] == ".md"
+    blob_hash = metadata["blob_hash"]
+    assert isinstance(blob_hash, str)
+    assert len(blob_hash) == _SHA1_HEX_LENGTH
+
+    state_file = cli._get_file_state_path(data_dir)
+    saved_state = json.loads(state_file.read_text())
+    repo_id = cli._get_repo_id(repo)
+    assert saved_state[repo_id]["file_hashes"] == {"README.md": blob_hash}

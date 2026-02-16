@@ -8,6 +8,7 @@ import json
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.progress import (
@@ -40,6 +41,10 @@ from town_elder.indexing.git_hash_scanner import (
     TrackedFile,
     get_git_root,
     scan_git_blobs,
+)
+from town_elder.indexing.pipeline import (
+    build_file_work_items,
+    parse_files_pipeline,
 )
 
 app = typer.Typer(
@@ -444,12 +449,11 @@ def _get_file_state_path(data_dir: Path) -> Path:
 
 def _load_file_state(
     state_file: Path, repo_path: Path
-) -> dict[str, dict[str, str]]:
+) -> dict[str, dict[str, Any]]:
     """Load file hash state for incremental file indexing.
 
     Returns:
-        Dictionary mapping repo_id to dict of file paths to blob hashes.
-        Format: {repo_id: {relative_path: blob_hash, ...}, ...}
+        Dictionary keyed by repo_id with file indexing state.
     """
     if not state_file.exists():
         return {}
@@ -466,7 +470,10 @@ def _load_file_state(
 
 
 def _save_file_state(
-    state_file: Path, repo_path: Path, file_hashes: dict[str, str]
+    state_file: Path,
+    repo_path: Path,
+    file_hashes: dict[str, str],
+    file_chunks: dict[str, int] | None = None,
 ) -> None:
     """Save file hash state for incremental file indexing.
 
@@ -476,6 +483,7 @@ def _save_file_state(
         state_file: Path to the state file.
         repo_path: Path to the repository (used for repo_id).
         file_hashes: Dictionary mapping relative file paths to blob hashes.
+        file_chunks: Optional chunk counts keyed by relative file path.
     """
     import os
     import tempfile
@@ -500,6 +508,7 @@ def _save_file_state(
         "repo_path": str(repo_path.resolve()),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "file_hashes": file_hashes,
+        "file_chunks": file_chunks or {},
     }
 
     # Atomic write
@@ -529,6 +538,60 @@ def _extract_blob_hash(blob_entry: TrackedFile | str | None) -> str | None:
     if isinstance(blob_entry, str):
         return blob_entry
     return blob_entry.blob_hash
+
+
+def _extract_file_chunks(repo_state: dict[str, Any]) -> dict[str, int]:
+    """Extract normalized chunk-count state for a repository."""
+
+    raw_chunks = repo_state.get("file_chunks")
+    if not isinstance(raw_chunks, dict):
+        return {}
+
+    normalized: dict[str, int] = {}
+    for path, chunk_count in raw_chunks.items():
+        if not isinstance(path, str):
+            continue
+        if isinstance(chunk_count, bool):
+            continue
+        if isinstance(chunk_count, int) and chunk_count > 0:
+            normalized[path] = chunk_count
+    return normalized
+
+
+def _build_file_doc_id(path_value: str, chunk_index: int = 0) -> str:
+    """Build deterministic doc ID for file content chunks."""
+
+    doc_id_input = path_value if chunk_index == 0 else f"{path_value}#chunk:{chunk_index}"
+    return hashlib.sha256(doc_id_input.encode()).hexdigest()[:16]
+
+
+def _get_doc_id_inputs(path_value: str, repo_root: Path) -> set[str]:
+    """Return canonical and legacy ID input strings for a path."""
+
+    doc_id_inputs = {path_value}
+    path_obj = Path(path_value)
+    if not path_obj.is_absolute():
+        doc_id_inputs.add(str((repo_root / path_obj).resolve()))
+    return doc_id_inputs
+
+
+def _delete_file_docs(
+    store: Any,
+    path_value: str,
+    repo_root: Path,
+    *,
+    start_chunk: int = 0,
+    chunk_count: int = 1,
+) -> None:
+    """Delete indexed docs for a file across a chunk index range."""
+
+    effective_chunk_count = max(chunk_count, 1)
+    for delete_input in _get_doc_id_inputs(path_value, repo_root):
+        for chunk_index in range(start_chunk, effective_chunk_count):
+            delete_doc_id = _build_file_doc_id(delete_input, chunk_index)
+            with contextlib.suppress(Exception):
+                # File may not exist in store.
+                store.delete(delete_doc_id)
 
 
 def _is_safe_te_storage_path(data_dir: Path, init_path: Path) -> bool:
@@ -1008,6 +1071,7 @@ def index_files(  # noqa: PLR0912
 
     # Load existing file state for incremental indexing
     file_state: dict[str, str] = {}
+    file_chunks: dict[str, int] = {}
     config = require_initialized(ctx)
     data_dir = config.data_dir
     state_file = _get_file_state_path(data_dir)
@@ -1016,7 +1080,14 @@ def index_files(  # noqa: PLR0912
         repo_id = _get_repo_id(index_path)
         all_file_states = _load_file_state(state_file, index_path)
         repo_state = all_file_states.get(repo_id, {})
-        file_state = repo_state.get("file_hashes", {})
+        raw_file_hashes = repo_state.get("file_hashes")
+        if isinstance(raw_file_hashes, dict):
+            file_state = {
+                rel_path: blob_hash
+                for rel_path, blob_hash in raw_file_hashes.items()
+                if isinstance(rel_path, str) and isinstance(blob_hash, str)
+            }
+        file_chunks = _extract_file_chunks(repo_state)
 
     with get_cli_services(ctx) as (svc, embedder, store):
         # Build exclusion patterns (additive to defaults)
@@ -1030,6 +1101,7 @@ def index_files(  # noqa: PLR0912
         files_to_process: list[tuple[Path, str, str | None]] = []
         current_tracked_paths: set[str] = set()
         next_file_hashes: dict[str, str] = {}
+        next_file_chunks: dict[str, int] = {}
         for file in files_to_index:
             # Get relative path from repo root
             try:
@@ -1055,6 +1127,7 @@ def index_files(  # noqa: PLR0912
                 if old_hash == blob_hash:
                     # File unchanged, skip
                     next_file_hashes[rel_path_str] = blob_hash
+                    next_file_chunks[rel_path_str] = file_chunks.get(rel_path_str, 1)
                     continue
             else:
                 blob_hash = None
@@ -1071,75 +1144,111 @@ def index_files(  # noqa: PLR0912
         skipped_count = 0
 
         try:
-            for file, rel_path_str, blob_hash in files_to_process:
+            work_items = build_file_work_items(files_to_process)
+            parsed_results = parse_files_pipeline(work_items)
+
+            for parsed_result in parsed_results:
+                file = Path(parsed_result.work_item.path)
+                rel_path_str = parsed_result.work_item.relative_path
+                blob_hash = parsed_result.work_item.blob_hash
                 indexed_successfully = False
+                indexed_chunk_count = 0
+                previous_hash = file_state.get(rel_path_str)
+                previous_chunk_count = file_chunks.get(rel_path_str, 1)
+
                 try:
-                    # Skip binary or unreadable files
-                    if not file.is_file():
+                    if parsed_result.has_error:
                         skipped_count += 1
+                        error_console.print(
+                            f"[yellow]Skipped {file}: {parsed_result.error}[/yellow]"
+                        )
                         continue
-                    text = file.read_text()
-                    # Use stable ID based on file path hash for idempotent indexing
-                    # zvec requires alphanumeric doc_ids, so we hash the path
-                    file_path_str = str(file)
-                    doc_id = hashlib.sha256(file_path_str.encode()).hexdigest()[:16]
 
-                    # Build metadata including blob hash if available
-                    metadata = {"source": str(file), "type": file.suffix}
-                    if blob_hash:
-                        metadata["blob_hash"] = blob_hash
+                    if not parsed_result.chunks:
+                        skipped_count += 1
+                        error_console.print(
+                            f"[yellow]Skipped {file}: no parseable content[/yellow]"
+                        )
+                        continue
 
-                    vector = embedder.embed_single(text)
-                    store.upsert(doc_id, vector, text, metadata)
+                    for fallback_chunk_index, chunk in enumerate(parsed_result.chunks):
+                        metadata = dict(parsed_result.work_item.metadata)
+                        if blob_hash:
+                            metadata["blob_hash"] = blob_hash
+                        metadata.update(chunk.metadata)
+
+                        chunk_index_value = metadata.get("chunk_index")
+                        if (
+                            isinstance(chunk_index_value, bool)
+                            or not isinstance(chunk_index_value, int)
+                            or chunk_index_value < 0
+                        ):
+                            chunk_index = fallback_chunk_index
+                            metadata["chunk_index"] = chunk_index
+                        else:
+                            chunk_index = chunk_index_value
+
+                        doc_id = _build_file_doc_id(parsed_result.work_item.path, chunk_index)
+                        vector = embedder.embed_single(chunk.text)
+                        store.upsert(doc_id, vector, chunk.text, metadata)
+                        indexed_chunk_count += 1
+
+                    if indexed_chunk_count <= 0:
+                        skipped_count += 1
+                        error_console.print(
+                            f"[yellow]Skipped {file}: no parseable content[/yellow]"
+                        )
+                        continue
+
                     indexed_count += 1
                     indexed_successfully = True
-                except UnicodeDecodeError:
-                    skipped_count += 1
-                    error_console.print(f"[yellow]Skipped binary file: {file}[/yellow]")
-                except PermissionError:
-                    skipped_count += 1
-                    error_console.print(
-                        f"[yellow]Skipped unreadable file: {file}[/yellow]"
-                    )
+
+                    if incremental and blob_hash:
+                        next_file_hashes[rel_path_str] = blob_hash
+                        next_file_chunks[rel_path_str] = indexed_chunk_count
+
+                        if previous_chunk_count > indexed_chunk_count:
+                            _delete_file_docs(
+                                store,
+                                rel_path_str,
+                                repo_root,
+                                start_chunk=indexed_chunk_count,
+                                chunk_count=previous_chunk_count,
+                            )
                 except Exception as e:
                     skipped_count += 1
                     error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
                 finally:
-                    if incremental and blob_hash:
-                        if indexed_successfully:
-                            next_file_hashes[rel_path_str] = blob_hash
-                        else:
-                            # Preserve previous successful hash so failed updates are retried.
-                            previous_hash = file_state.get(rel_path_str)
-                            if previous_hash is not None:
-                                next_file_hashes[rel_path_str] = previous_hash
+                    if (
+                        incremental
+                        and blob_hash
+                        and not indexed_successfully
+                        and previous_hash is not None
+                    ):
+                        # Preserve previous successful hash so failed updates are retried.
+                        next_file_hashes[rel_path_str] = previous_hash
+                        next_file_chunks[rel_path_str] = previous_chunk_count
 
             # Handle deletions: files that were in state but are no longer tracked
             if incremental and file_state:
                 deleted_files = set(file_state.keys()) - current_tracked_paths
                 if deleted_files:
-                    # Remove deleted files from vector store
                     for deleted_path in deleted_files:
-                        # Generate doc_id the same way as when indexing.
-                        # We support both legacy relative keys and canonical absolute paths.
-                        delete_id_inputs = {deleted_path}
-                        deleted_path_obj = Path(deleted_path)
-                        if not deleted_path_obj.is_absolute():
-                            delete_id_inputs.add(
-                                str((repo_root / deleted_path_obj).resolve())
-                            )
-
-                        for delete_id_input in delete_id_inputs:
-                            deleted_doc_id = hashlib.sha256(
-                                delete_id_input.encode()
-                            ).hexdigest()[:16]
-                            with contextlib.suppress(Exception):
-                                # File may not exist in store
-                                store.delete(deleted_doc_id)
+                        _delete_file_docs(
+                            store,
+                            deleted_path,
+                            repo_root,
+                            chunk_count=file_chunks.get(deleted_path, 1),
+                        )
 
             # Save updated file state
             if incremental:
-                _save_file_state(state_file, index_path, next_file_hashes)
+                _save_file_state(
+                    state_file,
+                    index_path,
+                    next_file_hashes,
+                    next_file_chunks,
+                )
 
         except Exception as e:
             console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
