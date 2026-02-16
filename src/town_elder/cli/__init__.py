@@ -1029,6 +1029,11 @@ def uninstall(
     git_dir = _get_git_dir(repo_path)
     hook_path = git_dir / "hooks" / "post-commit"
 
+    # Check if it's a git repository
+    if not git_dir.exists():
+        console.print(f"[red]Not a git repository: {path}[/red]")
+        raise typer.Exit(code=EXIT_ERROR)
+
     if not hook_path.exists():
         error_console.print(f"[yellow]No post-commit hook found at {hook_path}[/yellow]")
         return
