@@ -99,6 +99,26 @@ def _get_common_git_dir(repo_path: Path) -> Path:
         return _get_git_dir(repo_path)
 
 
+def _get_git_repo_root(repo_path: Path) -> Path | None:
+    """Get the git repository root directory using git rev-parse.
+
+    This works for subdirectories within a git repo, unlike checking for .git existence.
+
+    Returns the resolved Path to the repo root, or None if not in a git repository.
+    """
+    try:
+        result = subprocess.run(
+            ["/usr/bin/git", "rev-parse", "--show-toplevel"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(result.stdout.strip()).resolve()
+    except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError):
+        return None
+
+
 def _is_te_hook(content: str) -> bool:
     """Check if hook content is a Town Elder commit-index hook.
 
@@ -790,6 +810,23 @@ def commit_index(  # noqa: PLR0912, PLR0913
 
     # Validate repo path second
     repo_path = Path(path).resolve()
+
+    # If path is a subdirectory within a git repo, resolve to the repo root
+    # This handles cases where --repo points to a subdirectory like "src/" instead of the repo root
+    try:
+        result = subprocess.run(
+            ["/usr/bin/git", "rev-parse", "--show-toplevel"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        repo_root = Path(result.stdout.strip())
+        if repo_root.resolve() != repo_path.resolve():
+            repo_path = repo_root
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Not a git repo or git not available - will be caught by the .git check below
+        pass
 
     if not (repo_path / ".git").exists():
         error_console.print(f"[red]Error: Not a git repository: {path}[/red]")
