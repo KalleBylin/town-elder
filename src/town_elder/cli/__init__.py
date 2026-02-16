@@ -36,7 +36,11 @@ from town_elder.cli_services import (
 )
 from town_elder.config import get_config as get_config
 from town_elder.indexing.file_scanner import scan_files
-from town_elder.indexing.git_hash_scanner import get_git_root, scan_git_blobs
+from town_elder.indexing.git_hash_scanner import (
+    TrackedFile,
+    get_git_root,
+    scan_git_blobs,
+)
 
 app = typer.Typer(
     name="te",
@@ -515,6 +519,18 @@ def _save_file_state(
         raise
 
 
+def _extract_blob_hash(blob_entry: TrackedFile | str | None) -> str | None:
+    """Extract blob hash from scanner output.
+
+    Supports both current `TrackedFile` values and legacy/mock string values.
+    """
+    if blob_entry is None:
+        return None
+    if isinstance(blob_entry, str):
+        return blob_entry
+    return blob_entry.blob_hash
+
+
 def _is_safe_te_storage_path(data_dir: Path, init_path: Path) -> bool:
     """Validate that data_dir is a safe te-managed storage location.
 
@@ -980,7 +996,7 @@ def index_files(  # noqa: PLR0912
             repo_root = index_path
 
     # Get current tracked files with their blob hashes
-    current_blobs: dict[str, str] = {}
+    current_blobs: dict[str, TrackedFile | str] = {}
     if incremental:
         try:
             current_blobs = scan_git_blobs(repo_root)
@@ -1011,7 +1027,9 @@ def index_files(  # noqa: PLR0912
         files_to_index = scan_files(index_path, exclude_patterns=user_excludes)
 
         # Determine which files need indexing
-        files_to_process: list[tuple[Path, str | None]] = []
+        files_to_process: list[tuple[Path, str, str | None]] = []
+        current_tracked_paths: set[str] = set()
+        next_file_hashes: dict[str, str] = {}
         for file in files_to_index:
             # Get relative path from repo root
             try:
@@ -1024,19 +1042,24 @@ def index_files(  # noqa: PLR0912
 
             if incremental:
                 # Check if file is tracked in git
-                blob_hash = current_blobs.get(rel_path_str)
+                blob_hash = _extract_blob_hash(current_blobs.get(rel_path_str))
                 if blob_hash is None:
                     # File not in git (might be untracked or in exclusion)
                     # Skip it for incremental mode
                     continue
 
+                current_tracked_paths.add(rel_path_str)
+
                 # Check if hash changed
                 old_hash = file_state.get(rel_path_str)
                 if old_hash == blob_hash:
                     # File unchanged, skip
+                    next_file_hashes[rel_path_str] = blob_hash
                     continue
+            else:
+                blob_hash = None
 
-            files_to_process.append((file, blob_hash if incremental else None))
+            files_to_process.append((file, rel_path_str, blob_hash))
 
         console.print(
             f"[green]Indexing {len(files_to_process)} files"
@@ -1046,10 +1069,10 @@ def index_files(  # noqa: PLR0912
 
         indexed_count = 0
         skipped_count = 0
-        new_file_hashes: dict[str, str] = {}
 
         try:
-            for file, blob_hash in files_to_process:
+            for file, rel_path_str, blob_hash in files_to_process:
+                indexed_successfully = False
                 try:
                     # Skip binary or unreadable files
                     if not file.is_file():
@@ -1068,16 +1091,8 @@ def index_files(  # noqa: PLR0912
 
                     vector = embedder.embed_single(text)
                     store.upsert(doc_id, vector, text, metadata)
-
-                    # Record the hash for state
-                    if blob_hash:
-                        try:
-                            rel_path = file.relative_to(repo_root)
-                            new_file_hashes[str(rel_path)] = blob_hash
-                        except ValueError:
-                            new_file_hashes[str(file)] = blob_hash
-
                     indexed_count += 1
+                    indexed_successfully = True
                 except UnicodeDecodeError:
                     skipped_count += 1
                     error_console.print(f"[yellow]Skipped binary file: {file}[/yellow]")
@@ -1089,23 +1104,42 @@ def index_files(  # noqa: PLR0912
                 except Exception as e:
                     skipped_count += 1
                     error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
+                finally:
+                    if incremental and blob_hash:
+                        if indexed_successfully:
+                            next_file_hashes[rel_path_str] = blob_hash
+                        else:
+                            # Preserve previous successful hash so failed updates are retried.
+                            previous_hash = file_state.get(rel_path_str)
+                            if previous_hash is not None:
+                                next_file_hashes[rel_path_str] = previous_hash
 
             # Handle deletions: files that were in state but are no longer tracked
             if incremental and file_state:
-                deleted_files = set(file_state.keys()) - set(new_file_hashes.keys())
+                deleted_files = set(file_state.keys()) - current_tracked_paths
                 if deleted_files:
                     # Remove deleted files from vector store
                     for deleted_path in deleted_files:
-                        # Generate doc_id the same way as when indexing
-                        # Try both relative and absolute path
-                        deleted_doc_id = hashlib.sha256(deleted_path.encode()).hexdigest()[:16]
-                        with contextlib.suppress(Exception):
-                            # File may not exist in store
-                            store.delete(deleted_doc_id)
+                        # Generate doc_id the same way as when indexing.
+                        # We support both legacy relative keys and canonical absolute paths.
+                        delete_id_inputs = {deleted_path}
+                        deleted_path_obj = Path(deleted_path)
+                        if not deleted_path_obj.is_absolute():
+                            delete_id_inputs.add(
+                                str((repo_root / deleted_path_obj).resolve())
+                            )
+
+                        for delete_id_input in delete_id_inputs:
+                            deleted_doc_id = hashlib.sha256(
+                                delete_id_input.encode()
+                            ).hexdigest()[:16]
+                            with contextlib.suppress(Exception):
+                                # File may not exist in store
+                                store.delete(deleted_doc_id)
 
             # Save updated file state
-            if incremental and new_file_hashes:
-                _save_file_state(state_file, index_path, new_file_hashes)
+            if incremental:
+                _save_file_state(state_file, index_path, next_file_hashes)
 
         except Exception as e:
             console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
