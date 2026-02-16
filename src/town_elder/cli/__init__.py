@@ -682,13 +682,13 @@ def add(
     ctx: typer.Context,
     text: str = typer.Argument(
         None,
-        help="Text content to add to the vector store",
+        help="Text content, file path, or '-' for stdin",
     ),
     text_option: str = typer.Option(
         None,
         "--text",
         "-t",
-        help="Text content to add to the vector store (alternative to positional argument)",
+        help="Text content to add (alternative to positional argument)",
     ),
     metadata: str = typer.Option(
         "",
@@ -697,16 +697,58 @@ def add(
         help="JSON metadata string (must be valid JSON)",
     ),
 ) -> None:
-    """Add one ad-hoc document to the vector store."""
+    """Add one ad-hoc document to the vector store.
+
+    Supports multiple input modes:
+    - Direct text: te add "some text"
+    - File input: te add path/to/file.txt
+    - Stdin input: echo "text" | te add - or te add -
+    """
     import uuid
 
-    # Allow both positional argument and --text option
-    if text is None and text_option is None:
-        error_console.print("[red]Error: Either provide text as argument or use --text option[/red]")
-        raise typer.Exit(code=EXIT_INVALID_ARG)
+    # Determine text content from various sources
+    text_content: str | None = None
 
-    # Prefer positional argument, fall back to option
-    text_content = text if text is not None else text_option
+    # Priority: --text option > positional argument
+    if text_option is not None:
+        text_content = text_option
+    elif text is not None:
+        # Check if it's stdin marker or a file path
+        if text == "-":
+            # Read from stdin
+            import sys
+
+            text_content = sys.stdin.read()
+            if not text_content:
+                error_console.print("[red]Error: No input provided via stdin[/red]")
+                raise typer.Exit(code=EXIT_INVALID_ARG)
+        else:
+            # Try to read as file
+            text_path = Path(text)
+            if text_path.exists() and text_path.is_file():
+                try:
+                    text_content = text_path.read_text(encoding="utf-8")
+                except Exception as e:
+                    error_console.print(f"[red]Error reading file:[/red] {_escape_rich(str(e))}")
+                    raise typer.Exit(code=EXIT_ERROR)
+            else:
+                # Treat as literal text
+                text_content = text
+    else:
+        # Check if stdin has content (for shell pipelines)
+        import sys
+
+        if not sys.stdin.isatty():
+            text_content = sys.stdin.read()
+            if not text_content:
+                error_console.print("[red]Error: No input provided via stdin[/red]")
+                raise typer.Exit(code=EXIT_INVALID_ARG)
+        else:
+            error_console.print(
+                "[red]Error: Provide text as argument, file path, '-' for stdin, "
+                "or use --text option[/red]"
+            )
+            raise typer.Exit(code=EXIT_INVALID_ARG)
 
     # Parse metadata with better error message
     meta = {}
