@@ -5,7 +5,6 @@ import hashlib
 import json
 import shlex
 import subprocess
-from itertools import chain
 from pathlib import Path
 
 import typer
@@ -34,6 +33,7 @@ from town_elder.cli_services import (
     require_initialized,
 )
 from town_elder.config import get_config as get_config
+from town_elder.indexing.file_scanner import scan_files
 
 app = typer.Typer(
     name="te",
@@ -837,39 +837,14 @@ def index_files(  # noqa: PLR0912
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     with get_cli_services(ctx) as (svc, embedder, store):
-        # Default exclusion patterns
-        default_excludes = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", "venv", ".env", ".eggs", "*.egg-info", ".hg", ".svn", ".bzr", "vendor"}
-        if exclude:
-            default_excludes.update(exclude)
+        # Build exclusion patterns (additive to defaults)
+        user_excludes = frozenset(exclude) if exclude else None
 
-        def should_exclude(path: Path) -> bool:
-            """Check if path matches any exclusion pattern."""
-            parts = path.parts
-            for pattern in default_excludes:
-                if pattern.startswith("*"):
-                    # Handle glob patterns like *.egg-info
-                    if any(part.endswith(pattern[1:]) for part in parts):
-                        return True
-                else:
-                    # Handle directory name patterns
-                    if pattern in parts:
-                        return True
-            return False
+        # Use the scanner module for file discovery
+        # This includes .py, .md, .rst by default and excludes _build, .git, etc.
+        files_to_index = scan_files(index_path, exclude_patterns=user_excludes)
 
-        # Find all text files with exclusion filtering
-        # Use chain.from_iterable to lazily combine glob results without materializing
-        # full lists in memory - important for large repositories
-        all_files = chain.from_iterable([index_path.rglob("*.py"), index_path.rglob("*.md")])
-        # Single-pass filtering to avoid multiple iterations over the file list
-        files_to_index = []
-        excluded_files = []
-        for f in all_files:
-            if should_exclude(f):
-                excluded_files.append(f)
-            else:
-                files_to_index.append(f)
-
-        console.print(f"[green]Indexing {len(files_to_index)} files (attempted {len(files_to_index) + len(excluded_files)}, excluded {len(excluded_files)})...[/green]")
+        console.print(f"[green]Indexing {len(files_to_index)} files...[/green]")
 
         indexed_count = 0
         skipped_count = 0
@@ -905,9 +880,9 @@ def index_files(  # noqa: PLR0912
             raise typer.Exit(code=EXIT_ERROR)
 
     if skipped_count > 0:
-        console.print(f"[green]Indexed {indexed_count} files, skipped {skipped_count} (excluded {len(excluded_files)})[/green]")
+        console.print(f"[green]Indexed {indexed_count} files, skipped {skipped_count}[/green]")
     else:
-        console.print(f"[green]Indexed {indexed_count} files (excluded {len(excluded_files)})[/green]")
+        console.print(f"[green]Indexed {indexed_count} files[/green]")
 
 
 def _run_commit_index(  # noqa: PLR0912, PLR0913
