@@ -97,12 +97,23 @@ class DiffFile:
 class DiffParser:
     """Parser for git diff output."""
 
+    def __init__(self, warn_on_parse_error: bool = True):
+        """Initialize the parser.
+
+        Args:
+            warn_on_parse_error: If True, log warnings when diff headers fail to parse.
+        """
+        self.warn_on_parse_error = warn_on_parse_error
+
     def parse(self, diff_output: str) -> Iterator[DiffFile]:  # noqa: PLR0912
         """Parse git diff output into file changes."""
+        import sys
+
         current_file = None
         current_status = None
         current_hunks: list[str] = []
         current_hunk_lines: list[str] = []
+        parse_error_count = 0
 
         for line in diff_output.split("\n"):
             # New file start
@@ -119,6 +130,15 @@ class DiffParser:
                 b_path = _extract_b_path(line)
                 if b_path:
                     current_file = _parse_git_path(b_path)
+                else:
+                    # Failed to parse the diff header - don't associate content with wrong file
+                    if self.warn_on_parse_error:
+                        print(
+                            f"Warning: Failed to parse diff header: {line[:60]}...",
+                            file=sys.stderr,
+                        )
+                    parse_error_count += 1
+                    current_file = None  # Explicitly set to None to prevent content association
                 current_status = None
                 current_hunks = []
                 current_hunk_lines = []
