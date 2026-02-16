@@ -160,6 +160,33 @@ def test_root_help_shows_only_canonical_top_level_commands():
     assert "index-commits" not in result.output
 
 
+def test_get_git_repo_root_finds_parent_repo_from_subdirectory(tmp_path):
+    """Git repo root detection should walk up from nested subdirectories."""
+    repo_path = tmp_path / "repo"
+    nested_path = repo_path / "src" / "pkg"
+    nested_path.mkdir(parents=True)
+    (repo_path / ".git").mkdir()
+
+    assert cli._get_git_repo_root(nested_path) == repo_path.resolve()
+
+
+def test_get_common_git_dir_resolves_worktree_commondir(tmp_path):
+    """Worktree common git dir should be resolved from the gitdir commondir file."""
+    repo_path = tmp_path / "worktree"
+    repo_path.mkdir()
+
+    # Simulate a worktree .git file that points to a worktree-private gitdir.
+    worktree_git_dir = repo_path / ".git-worktrees" / "feature"
+    worktree_git_dir.mkdir(parents=True)
+    (repo_path / ".git").write_text("gitdir: .git-worktrees/feature\n")
+
+    common_git_dir = repo_path / ".git-common"
+    common_git_dir.mkdir()
+    (worktree_git_dir / "commondir").write_text("../../.git-common\n")
+
+    assert cli._get_common_git_dir(repo_path) == common_git_dir.resolve()
+
+
 class _FakeEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Batch embed method used by commit-index."""

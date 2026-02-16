@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import shlex
-import shutil
 import subprocess
 from itertools import chain
 from pathlib import Path
@@ -71,17 +70,14 @@ def _get_git_dir(repo_path: Path) -> Path:
     return git_path
 
 
-def _find_git_executable() -> str:
-    """Find the git executable using shutil.which.
-
-    Returns the path to git if found, otherwise raises FileNotFoundError.
-    This ensures portability across different systems where git may be
-    installed in non-standard locations.
-    """
-    git_path = shutil.which("git")
-    if git_path is None:
-        raise FileNotFoundError("git executable not found in PATH")
-    return git_path
+def _find_git_repo_root(path: Path) -> Path | None:
+    """Find the nearest parent directory containing .git."""
+    if not path.exists() or not path.is_dir():
+        return None
+    for candidate in (path, *path.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
 
 
 def _get_common_git_dir(repo_path: Path) -> Path:
@@ -92,45 +88,32 @@ def _get_common_git_dir(repo_path: Path) -> Path:
     worktree-specific one). This is the correct directory for hooks since Git
     executes hooks from the common gitdir, not the worktree-private one.
 
-    Uses 'git rev-parse --git-common-dir' to determine the correct path.
+    For worktrees, the worktree gitdir contains a "commondir" file pointing to
+    the shared .git directory.
     """
-    try:
-        result = subprocess.run(
-            [_find_git_executable(), "rev-parse", "--git-common-dir"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        git_common_dir = result.stdout.strip()
-        git_dir_path = Path(git_common_dir)
-        # Resolve relative paths against the repo_path
-        if not git_dir_path.is_absolute():
-            git_dir_path = (repo_path / git_dir_path).resolve()
-        return git_dir_path
-    except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError):
-        # Fallback to _get_git_dir if git command fails or path is invalid
+    repo_root = _find_git_repo_root(repo_path)
+    if repo_root is None:
+        # Keep existing fallback behavior for non-repo paths.
         return _get_git_dir(repo_path)
+
+    git_dir = _get_git_dir(repo_root)
+    commondir_file = git_dir / "commondir"
+    if commondir_file.is_file():
+        try:
+            common_git_dir = Path(commondir_file.read_text().strip())
+            if not common_git_dir.is_absolute():
+                common_git_dir = (git_dir / common_git_dir).resolve()
+            return common_git_dir
+        except OSError:
+            # If commondir is unreadable, use best-effort git_dir fallback.
+            pass
+    return git_dir
 
 
 def _get_git_repo_root(repo_path: Path) -> Path | None:
-    """Get the git repository root directory using git rev-parse.
-
-    This works for subdirectories within a git repo, unlike checking for .git existence.
-
-    Returns the resolved Path to the repo root, or None if not in a git repository.
-    """
-    try:
-        result = subprocess.run(
-            [_find_git_executable(), "rev-parse", "--show-toplevel"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return Path(result.stdout.strip()).resolve()
-    except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError):
-        return None
+    """Get the nearest git repository root for the given directory path."""
+    root = _find_git_repo_root(repo_path)
+    return root.resolve() if root is not None else None
 
 
 def _is_te_hook(content: str) -> bool:
@@ -691,6 +674,74 @@ def query(
     _run_search(ctx, query=query, top_k=top_k)
 
 
+def _read_add_stdin_text() -> str:
+    """Read text content from stdin for `te add`."""
+    import sys
+
+    text_content = sys.stdin.read()
+    if not text_content:
+        error_console.print("[red]Error: No input provided via stdin[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+    return text_content
+
+
+def _resolve_add_text_argument(text: str) -> str:
+    """Resolve positional add input as stdin marker, file path, or literal text."""
+    if text == "-":
+        return _read_add_stdin_text()
+
+    text_path = Path(text)
+    if not (text_path.exists() and text_path.is_file()):
+        return text
+
+    try:
+        return text_path.read_text(encoding="utf-8")
+    except Exception as e:
+        error_console.print(f"[red]Error reading file:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+
+
+def _get_add_text_content(text: str | None, text_option: str | None) -> str:
+    """Get add content from --text, positional argument, or stdin."""
+    if text_option is not None:
+        return text_option
+
+    if text is not None:
+        return _resolve_add_text_argument(text)
+
+    import sys
+
+    if not sys.stdin.isatty():
+        return _read_add_stdin_text()
+
+    error_console.print(
+        "[red]Error: Provide text as argument, file path, '-' for stdin, "
+        "or use --text option[/red]"
+    )
+    raise typer.Exit(code=EXIT_INVALID_ARG)
+
+
+def _parse_add_metadata(metadata: str) -> dict:
+    """Parse and validate add metadata option."""
+    if not metadata:
+        return {}
+
+    try:
+        parsed_metadata = json.loads(metadata)
+    except json.JSONDecodeError as e:
+        error_console.print("[red]Error: Invalid JSON metadata[/red]")
+        error_console.print(f"[dim]JSON parse error at position {e.pos}: {e.msg}[/dim]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+
+    if not isinstance(parsed_metadata, dict):
+        error_console.print(
+            f"[red]Error: Metadata must be a JSON object (dict), not {type(parsed_metadata).__name__}[/red]"
+        )
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+
+    return parsed_metadata
+
+
 @app.command()
 def add(
     ctx: typer.Context,
@@ -720,64 +771,8 @@ def add(
     """
     import uuid
 
-    # Determine text content from various sources
-    text_content: str | None = None
-
-    # Priority: --text option > positional argument
-    if text_option is not None:
-        text_content = text_option
-    elif text is not None:
-        # Check if it's stdin marker or a file path
-        if text == "-":
-            # Read from stdin
-            import sys
-
-            text_content = sys.stdin.read()
-            if not text_content:
-                error_console.print("[red]Error: No input provided via stdin[/red]")
-                raise typer.Exit(code=EXIT_INVALID_ARG)
-        else:
-            # Try to read as file
-            text_path = Path(text)
-            if text_path.exists() and text_path.is_file():
-                try:
-                    text_content = text_path.read_text(encoding="utf-8")
-                except Exception as e:
-                    error_console.print(f"[red]Error reading file:[/red] {_escape_rich(str(e))}")
-                    raise typer.Exit(code=EXIT_ERROR)
-            else:
-                # Treat as literal text
-                text_content = text
-    else:
-        # Check if stdin has content (for shell pipelines)
-        import sys
-
-        if not sys.stdin.isatty():
-            text_content = sys.stdin.read()
-            if not text_content:
-                error_console.print("[red]Error: No input provided via stdin[/red]")
-                raise typer.Exit(code=EXIT_INVALID_ARG)
-        else:
-            error_console.print(
-                "[red]Error: Provide text as argument, file path, '-' for stdin, "
-                "or use --text option[/red]"
-            )
-            raise typer.Exit(code=EXIT_INVALID_ARG)
-
-    # Parse metadata with better error message
-    meta = {}
-    if metadata:
-        try:
-            meta = json.loads(metadata)
-        except json.JSONDecodeError as e:
-            error_console.print("[red]Error: Invalid JSON metadata[/red]")
-            error_console.print(f"[dim]JSON parse error at position {e.pos}: {e.msg}[/dim]")
-            raise typer.Exit(code=EXIT_INVALID_ARG)
-
-        # Validate metadata is an object (dict), not a list or string
-        if not isinstance(meta, dict):
-            error_console.print(f"[red]Error: Metadata must be a JSON object (dict), not {type(meta).__name__}[/red]")
-            raise typer.Exit(code=EXIT_INVALID_ARG)
+    text_content = _get_add_text_content(text=text, text_option=text_option)
+    meta = _parse_add_metadata(metadata)
 
     with get_cli_services(ctx) as (svc, embedder, store):
         try:
