@@ -811,27 +811,21 @@ def commit_index(  # noqa: PLR0912, PLR0913
     # Validate repo path second
     repo_path = Path(path).resolve()
 
-    # If path is a subdirectory within a git repo, resolve to the repo root
-    # This handles cases where --repo points to a subdirectory like "src/" instead of the repo root
-    try:
-        result = subprocess.run(
-            ["/usr/bin/git", "rev-parse", "--show-toplevel"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        repo_root = Path(result.stdout.strip())
-        if repo_root.resolve() != repo_path.resolve():
-            repo_path = repo_root
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # Not a git repo or git not available - will be caught by the .git check below
-        pass
+    # Use git to find the repo root - this handles subdirectories correctly
+    repo_root = _get_git_repo_root(repo_path)
 
-    if not (repo_path / ".git").exists():
-        error_console.print(f"[red]Error: Not a git repository: {path}[/red]")
-        console.print("[dim]Ensure the path contains a .git directory[/dim]")
-        raise typer.Exit(code=EXIT_INVALID_ARG)
+    # If git rev-parse failed, check for .git as a fallback (handles test mocks)
+    if repo_root is None:
+        if (repo_path / ".git").exists():
+            # Has .git but git command failed - use path as-is
+            pass
+        else:
+            error_console.print(f"[red]Error: Not a git repository: {path}[/red]")
+            console.print("[dim]Ensure the path is inside a git repository[/dim]")
+            raise typer.Exit(code=EXIT_INVALID_ARG)
+    # If path is a subdirectory, use the repo root
+    elif repo_root != repo_path:
+        repo_path = repo_root
 
     if limit <= 0:
         error_console.print("[red]Error: --limit must be greater than 0[/red]")
