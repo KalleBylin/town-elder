@@ -282,6 +282,10 @@ def _load_index_state(state_file: Path, repo_path: Path) -> tuple[str | None, di
         # Ignore invalid state file, treat as empty
         return last_indexed, {"repos": {}}
 
+    # Ensure state is a dict (handle valid JSON that is not an object, e.g., ["repos"])
+    if not isinstance(state, dict):
+        return last_indexed, {"repos": {}}
+
     # Check for legacy format (global last_indexed_commit key)
     if "last_indexed_commit" in state and "repos" not in state:
         # Migration: convert legacy format to repo-scoped
@@ -327,6 +331,10 @@ def _save_index_state(state_file: Path, repo_path: Path, frontier_commit_hash: s
         except Exception:
             state = {"repos": {}}
     else:
+        state = {"repos": {}}
+
+    # Ensure state is a dict (handle valid JSON that is not an object)
+    if not isinstance(state, dict):
         state = {"repos": {}}
 
     if "repos" not in state:
