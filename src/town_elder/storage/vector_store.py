@@ -133,9 +133,11 @@ class ZvecStore:
         This provides idempotent indexing: running the same upsert multiple times
         produces the same result without duplicating documents.
         """
-        # Delete existing document if it exists, then insert new one
-        self.delete(doc_id)
-        return self.insert(doc_id, vector, text, metadata)
+        # Use lock to ensure atomic delete+insert operation
+        with self._lock:
+            # Delete existing document if it exists, then insert new one
+            self.delete(doc_id)
+            return self.insert(doc_id, vector, text, metadata)
 
     def search(self, query_vector: np.ndarray, top_k: int = 5) -> list[dict[str, Any]]:
         """Search for similar documents using cosine similarity."""
