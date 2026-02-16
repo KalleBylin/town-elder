@@ -1,4 +1,5 @@
 """Regression tests for CLI dispatch and index commits state safety."""
+
 from __future__ import annotations
 
 import hashlib
@@ -46,8 +47,12 @@ def test_index_commits_executes_via_shared_helper_default_incremental(monkeypatc
     repo_path = "repo-path"
 
     def fake_run_commit_index(*args) -> None:
-        _, path, limit, all_history, batch_size, max_diff_size, incremental, force = args
-        calls.append((path, limit, all_history, batch_size, max_diff_size, incremental, force))
+        _, path, limit, all_history, batch_size, max_diff_size, incremental, force = (
+            args
+        )
+        calls.append(
+            (path, limit, all_history, batch_size, max_diff_size, incremental, force)
+        )
 
     monkeypatch.setattr(cli, "_run_commit_index", fake_run_commit_index)
 
@@ -79,8 +84,12 @@ def test_index_commits_executes_via_shared_helper_full_mode(monkeypatch):
     repo_path = "repo-path"
 
     def fake_run_commit_index(*args) -> None:
-        _, path, limit, all_history, batch_size, max_diff_size, incremental, force = args
-        calls.append((path, limit, all_history, batch_size, max_diff_size, incremental, force))
+        _, path, limit, all_history, batch_size, max_diff_size, incremental, force = (
+            args
+        )
+        calls.append(
+            (path, limit, all_history, batch_size, max_diff_size, incremental, force)
+        )
 
     monkeypatch.setattr(cli, "_run_commit_index", fake_run_commit_index)
 
@@ -140,7 +149,10 @@ def test_index_all_option_shows_in_help():
     assert result.exit_code == 0
     assert "--all" in result.output
     # Should explain what --all does
-    assert "all project files" in result.output.lower() or "full repository" in result.output.lower()
+    assert (
+        "all project files" in result.output.lower()
+        or "full repository" in result.output.lower()
+    )
 
 
 def test_index_all_dispatches_to_index_files(monkeypatch):
@@ -162,6 +174,30 @@ def test_index_all_dispatches_to_index_files(monkeypatch):
     assert len(calls) == 1
     assert calls[0][0] == "."
     assert calls[0][1] is None
+
+
+def test_index_all_rejected_with_subcommand(monkeypatch):
+    """`te index --all <subcommand>` should fail instead of dispatching both."""
+    file_calls: list[tuple] = []
+    commit_calls: list[tuple] = []
+
+    def fake_index_files(ctx, path, exclude=None) -> None:
+        _ = ctx
+        file_calls.append((path, exclude))
+
+    def fake_run_commit_index(*args) -> None:
+        _ = args
+        commit_calls.append(("called",))
+
+    monkeypatch.setattr(cli, "index_files", fake_index_files)
+    monkeypatch.setattr(cli, "_run_commit_index", fake_run_commit_index)
+
+    result = runner.invoke(cli.app, ["index", "--all", "commits"])
+
+    assert result.exit_code == cli.EXIT_INVALID_ARG
+    assert "cannot be combined" in result.output.lower()
+    assert file_calls == []
+    assert commit_calls == []
 
 
 def test_index_files_still_works_as_subcommand(tmp_path):
@@ -225,15 +261,25 @@ class _FakeGitRunner:
     def __init__(self, commits: list[Commit]):
         self._commits = commits
 
-    def get_commits(self, since: str | None = None, limit: int = 100, offset: int = 0, include_files: bool = False) -> list[Commit]:
+    def get_commits(
+        self,
+        since: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        include_files: bool = False,
+    ) -> list[Commit]:
         _ = since, include_files
-        return self._commits[offset:offset + limit]
+        return self._commits[offset : offset + limit]
 
-    def get_commits_with_files_batch(self, since: str | None = None, limit: int = 100, offset: int = 0) -> list[Commit]:
+    def get_commits_with_files_batch(
+        self, since: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[Commit]:
         _ = since
-        return self._commits[offset:offset + limit]
+        return self._commits[offset : offset + limit]
 
-    def get_diffs_batch(self, commit_hashes: list[str], max_size: int = 100 * 1024) -> dict[str, str]:
+    def get_diffs_batch(
+        self, commit_hashes: list[str], max_size: int = 100 * 1024
+    ) -> dict[str, str]:
         _ = max_size
         return {h: f"diff for {h}" for h in commit_hashes}
 
@@ -327,7 +373,9 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_services, "get_config", fake_get_config)
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
-    first_result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"])
+    first_result = runner.invoke(
+        cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"]
+    )
     assert first_result.exit_code == 0
 
     state_file = data_dir / "index_state.json"
@@ -335,7 +383,9 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
     assert "c2" not in controller.indexed_hashes
 
     controller.fail_hashes.clear()
-    second_result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"])
+    second_result = runner.invoke(
+        cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"]
+    )
     assert second_result.exit_code == 0
 
     assert _get_last_indexed_commit(state_file, repo_path) == "c3"
@@ -365,12 +415,17 @@ def test_commit_index_respects_limit_without_all(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_services, "get_config", fake_get_config)
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
-    result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", str(_TEST_LIMIT)])
+    result = runner.invoke(
+        cli.app,
+        ["index", "commits", "--repo", str(repo_path), "--limit", str(_TEST_LIMIT)],
+    )
     assert result.exit_code == 0
     assert len(controller.indexed_hashes) == _TEST_LIMIT
 
 
-def test_commit_index_advances_state_when_sentinel_found_after_pagination(monkeypatch, tmp_path):
+def test_commit_index_advances_state_when_sentinel_found_after_pagination(
+    monkeypatch, tmp_path
+):
     """State should advance when sentinel is found in a later pagination batch."""
     repo_path = tmp_path / "repo"
     (repo_path / ".git").mkdir(parents=True)
@@ -398,7 +453,16 @@ def test_commit_index_advances_state_when_sentinel_found_after_pagination(monkey
 
     result = runner.invoke(
         cli.app,
-        ["index", "commits", "--repo", str(repo_path), "--limit", "100", "--batch-size", "50"],
+        [
+            "index",
+            "commits",
+            "--repo",
+            str(repo_path),
+            "--limit",
+            "100",
+            "--batch-size",
+            "50",
+        ],
     )
     assert result.exit_code == 0
     assert _get_last_indexed_commit(state_file, repo_path) == f"c{total_commits}"
@@ -412,10 +476,10 @@ def test_is_te_hook_detects_te():
     """Hook detection should recognize 'te index commits'."""
     from town_elder.cli import _is_te_hook
 
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 te index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is True
 
 
@@ -423,10 +487,10 @@ def test_is_te_hook_detects_python_m_town_elder():
     """Hook detection should recognize 'python -m town_elder index commits'."""
     from town_elder.cli import _is_te_hook
 
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 python -m town_elder index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is True
 
 
@@ -434,10 +498,10 @@ def test_is_te_hook_detects_with_data_dir_arg():
     """Hook detection should recognize hooks with --data-dir argument."""
     from town_elder.cli import _is_te_hook
 
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 te --data-dir /path/to/data index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is True
 
 
@@ -445,10 +509,10 @@ def test_is_te_hook_detects_uvx_from_town_elder():
     """Hook detection should recognize 'uvx --from town-elder te index commits'."""
     from town_elder.cli import _is_te_hook
 
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 uvx --from town-elder te index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is True
 
 
@@ -456,10 +520,10 @@ def test_is_te_hook_detects_python_m_with_data_dir():
     """Hook detection should recognize 'python -m town_elder --data-dir' hooks."""
     from town_elder.cli import _is_te_hook
 
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 python -m town_elder --data-dir "/path/with spaces/data" index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is True
 
 
@@ -467,10 +531,10 @@ def test_is_te_hook_rejects_non_te_hooks():
     """Hook detection should reject non-Town Elder hooks."""
     from town_elder.cli import _is_te_hook
 
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 # Some other hook
 other-tool index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is False
 
 
@@ -478,9 +542,9 @@ def test_is_te_hook_rejects_partial_matches():
     """Hook detection should reject partial matches like 'ate index commits'."""
     from town_elder.cli import _is_te_hook
 
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 ate index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is False
 
 
@@ -490,11 +554,11 @@ def test_is_te_hook_rejects_comment_text():
 
     # This should NOT be detected as a TE hook even though it contains "te index commits"
     # in a comment
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 # This is a comment about te index commits
 echo "Running other hook"
 other-tool index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is False
 
 
@@ -503,10 +567,10 @@ def test_is_te_hook_rejects_shebang_in_comment():
     from town_elder.cli import _is_te_hook
 
     # This SHOULD be detected as a TE hook because the actual command is present
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 te index commits --repo "$(git rev-parse --show-toplevel)"
-'''
+"""
     assert _is_te_hook(content) is True
 
 
@@ -519,17 +583,17 @@ def test_is_te_hook_rejects_quoted_strings():
     from town_elder.cli import _is_te_hook
 
     # Non-TE hook with double-quoted string should be rejected
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 echo "te index commits"
 other-tool --run
-'''
+"""
     assert _is_te_hook(content) is False
 
     # Non-TE hook with single-quoted string should be rejected
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 echo 'te index commits'
 other-tool --run
-'''
+"""
     assert _is_te_hook(content) is False
 
 
@@ -538,11 +602,11 @@ def test_is_te_hook_accepts_quoted_strings_with_actual_command():
     from town_elder.cli import _is_te_hook
 
     # This SHOULD be detected as a TE hook because the actual command is present
-    content = '''#!/bin/sh
+    content = """#!/bin/sh
 echo "te index commits"
 te index commits --repo "$(git rev-parse --show-toplevel)"
 echo "done"
-'''
+"""
     assert _is_te_hook(content) is True
 
 
@@ -559,7 +623,7 @@ def test_hook_generation_uses_python_m_town_elder(tmp_path):
 
     result = runner.invoke(
         cli.app,
-        ["--data-dir", str(data_dir), "hook", "install", "--repo", str(repo_path)]
+        ["--data-dir", str(data_dir), "hook", "install", "--repo", str(repo_path)],
     )
 
     assert result.exit_code == 0
@@ -587,7 +651,7 @@ def test_hook_generation_quotes_data_dir(tmp_path):
     # Pass data-dir via CLI option (invocation-scoped)
     result = runner.invoke(
         cli.app,
-        ["--data-dir", str(data_dir), "hook", "install", "--repo", str(repo_path)]
+        ["--data-dir", str(data_dir), "hook", "install", "--repo", str(repo_path)],
     )
 
     assert result.exit_code == 0
@@ -601,7 +665,9 @@ def test_hook_generation_quotes_data_dir(tmp_path):
     assert f"--data-dir {escaped}" in hook_content
 
 
-def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monkeypatch, tmp_path):
+def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(
+    monkeypatch, tmp_path
+):
     """When sentinel commit is missing, should warn and NOT advance state."""
     repo_path = tmp_path / "repo"
     (repo_path / ".git").mkdir(parents=True)
@@ -629,7 +695,9 @@ def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monk
     monkeypatch.setattr(cli_services, "get_config", fake_get_config)
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
-    result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"])
+    result = runner.invoke(
+        cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"]
+    )
 
     assert result.exit_code == 0
     # Should warn about missing sentinel
@@ -638,7 +706,9 @@ def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(monk
     state = json.loads(state_file.read_text())
     repo_id = _get_repo_id(repo_path)
     stored_commit = state.get("repos", {}).get(repo_id, {}).get("last_indexed_commit")
-    assert stored_commit == "missing_commit", f"State should not advance. Got: {stored_commit}"
+    assert stored_commit == "missing_commit", (
+        f"State should not advance. Got: {stored_commit}"
+    )
     # Should have indexed all available commits (more than limit, but should get all via pagination)
     assert len(controller.indexed_hashes) == _TEST_COMMITS_LARGE
 
@@ -672,7 +742,9 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
     # First run: sentinel not found
-    result1 = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"])
+    result1 = runner.invoke(
+        cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"]
+    )
     assert result1.exit_code == 0
     assert "Warning: Last indexed commit not found" in result1.output
     # State should NOT have advanced (sentinel not found)
@@ -686,7 +758,9 @@ def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_pat
     state_file.write_text(json.dumps({"last_indexed_commit": "c1"}))
 
     # Second run: should find c1 and only index newer commits
-    result2 = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"])
+    result2 = runner.invoke(
+        cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "100"]
+    )
     assert result2.exit_code == 0
     assert "Warning" not in result2.output
     # State should have advanced to the newest indexed commit
@@ -729,7 +803,9 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
 
     # === Index Repo A ===
     controller_a = _StoreController(fail_hashes=set())
-    factory_a = _FakeFactory(git_runner=_FakeGitRunner(commits_a), controller=controller_a)
+    factory_a = _FakeFactory(
+        git_runner=_FakeGitRunner(commits_a), controller=controller_a
+    )
 
     def fake_get_service_factory_a(data_dir=None):
         _ = data_dir
@@ -737,7 +813,9 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory_a)
 
-    result_a = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_a_path), "--limit", "10"])
+    result_a = runner.invoke(
+        cli.app, ["index", "commits", "--repo", str(repo_a_path), "--limit", "10"]
+    )
     assert result_a.exit_code == 0
 
     state_file = data_dir / "index_state.json"
@@ -749,7 +827,9 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
 
     # === Index Repo B ===
     controller_b = _StoreController(fail_hashes=set())
-    factory_b = _FakeFactory(git_runner=_FakeGitRunner(commits_b), controller=controller_b)
+    factory_b = _FakeFactory(
+        git_runner=_FakeGitRunner(commits_b), controller=controller_b
+    )
 
     def fake_get_service_factory_b(data_dir=None):
         _ = data_dir
@@ -757,7 +837,9 @@ def test_commit_index_multi_repo_isolation(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory_b)
 
-    result_b = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_b_path), "--limit", "10"])
+    result_b = runner.invoke(
+        cli.app, ["index", "commits", "--repo", str(repo_b_path), "--limit", "10"]
+    )
     assert result_b.exit_code == 0
     # Should NOT have "Warning: Last indexed commit not found" - that's the bug!
     assert "Warning: Last indexed commit not found" not in result_b.output
@@ -802,7 +884,9 @@ def test_commit_index_legacy_migration(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_services, "get_config", fake_get_config)
     monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
 
-    result = runner.invoke(cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"])
+    result = runner.invoke(
+        cli.app, ["index", "commits", "--repo", str(repo_path), "--limit", "10"]
+    )
     assert result.exit_code == 0
 
     # State file should now be in new format (migrated)
@@ -853,15 +937,21 @@ class TestHookExecution:
         try:
             # Initialize town_elder with explicit data-dir
             result = runner.invoke(
-                cli.app,
-                ["--data-dir", str(data_dir), "init", "--path", str(repo_path)]
+                cli.app, ["--data-dir", str(data_dir), "init", "--path", str(repo_path)]
             )
             assert result.exit_code == 0, f"Init failed: {result.output}"
 
             # Install hook with explicit data-dir
             result = runner.invoke(
                 cli.app,
-                ["--data-dir", str(data_dir), "hook", "install", "--repo", str(repo_path)]
+                [
+                    "--data-dir",
+                    str(data_dir),
+                    "hook",
+                    "install",
+                    "--repo",
+                    str(repo_path),
+                ],
             )
             assert result.exit_code == 0, f"Hook install failed: {result.output}"
 
@@ -888,11 +978,15 @@ class TestHookExecution:
 
             # Verify no index state before commit
             state_file = data_dir / "index_state.json"
-            assert not state_file.exists(), "Index state should not exist before first commit"
+            assert not state_file.exists(), (
+                "Index state should not exist before first commit"
+            )
 
             # Make a commit (this should trigger the hook)
             (repo_path / "test.txt").write_text("test content")
-            subprocess.run(["git", "add", "."], cwd=repo_path, capture_output=True, check=True)
+            subprocess.run(
+                ["git", "add", "."], cwd=repo_path, capture_output=True, check=True
+            )
             subprocess.run(
                 ["git", "commit", "-m", "test commit"],
                 cwd=repo_path,
@@ -915,13 +1009,19 @@ class TestHookExecution:
             assert len(repos) == 1, "Should have exactly one repo in state"
             repo_id = list(repos.keys())[0]
             repo_state = repos[repo_id]
-            assert "last_indexed_commit" in repo_state, "Index state missing last_indexed_commit"
+            assert "last_indexed_commit" in repo_state, (
+                "Index state missing last_indexed_commit"
+            )
             commit_hash = repo_state["last_indexed_commit"]
             assert commit_hash, "last_indexed_commit is empty"
 
             # 3. Verify the commit hash is valid (40 char hex for SHA)
-            assert len(commit_hash) == _HASH_LENGTH, f"Invalid commit hash length: {len(commit_hash)}"
-            assert all(c in _HEX_CHARS for c in commit_hash), f"Invalid commit hash: {commit_hash}"
+            assert len(commit_hash) == _HASH_LENGTH, (
+                f"Invalid commit hash length: {len(commit_hash)}"
+            )
+            assert all(c in _HEX_CHARS for c in commit_hash), (
+                f"Invalid commit hash: {commit_hash}"
+            )
 
             # Verify the commit actually exists in the repo
             result = subprocess.run(

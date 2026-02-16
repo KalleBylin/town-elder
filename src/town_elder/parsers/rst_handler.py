@@ -1,4 +1,5 @@
 """RST (reStructuredText) parser with semantic chunking and directive extraction."""
+
 from __future__ import annotations
 
 import logging
@@ -41,11 +42,20 @@ def _find_section_boundaries(content: str) -> list[tuple[int, str, str]]:
         # Check if this line could be an underline (previous line was heading)
         if i > 0:
             prev_line = lines[i - 1]
+            heading = prev_line.strip()
+            underline = line.strip()
+
+            # Heading and underline must be non-empty
+            if not heading or not underline:
+                continue
+
+            # Underline must be one repeated valid heading character
+            if len(set(underline)) != 1 or underline[0] not in RST_HEADING_CHARS:
+                continue
+
             # Underline must be at least as long as the heading text
-            if len(line) >= len(prev_line.strip()) and all(
-                c in RST_HEADING_CHARS for c in line.strip()
-            ):
-                boundaries.append((i, prev_line.strip(), line.strip()))
+            if len(underline) >= len(heading):
+                boundaries.append((i, heading, underline))
 
     return boundaries
 
@@ -77,11 +87,13 @@ def _build_section_tree(boundaries: list[tuple[int, str, str]]) -> list[dict[str
     sections = []
     for line_num, heading, underline in boundaries:
         level = _get_heading_level(underline)
-        sections.append({
-            "line": line_num,
-            "heading": heading,
-            "level": level,
-        })
+        sections.append(
+            {
+                "line": line_num,
+                "heading": heading,
+                "level": level,
+            }
+        )
     return sections
 
 
@@ -113,7 +125,9 @@ def _extract_directives(chunk_text: str) -> tuple[dict[str, list[str]], list[str
                     temporal_tags.append(f"{name}: {match}" if match else name)
             else:
                 # These are directive contents
-                directives[name] = [m.strip() if isinstance(m, str) else m[1].strip() for m in matches]
+                directives[name] = [
+                    m.strip() if isinstance(m, str) else m[1].strip() for m in matches
+                ]
 
     return directives, temporal_tags
 
@@ -152,7 +166,9 @@ def _extract_directives_content(text: str) -> dict[str, list[str]]:
         )
         versions_added = versionadded_pattern2.findall(text)
         if versions_added:
-            directives["versionadded"] = [content.strip() for _, content in versions_added]
+            directives["versionadded"] = [
+                content.strip() for _, content in versions_added
+            ]
 
     return directives
 
@@ -167,7 +183,9 @@ def _check_temporal_tags(text: str) -> list[str]:
         tags.append("deprecated")
 
     # Version changed
-    versionchanged_pattern = re.compile(r"\.\. versionchanged::\s*(.*?)(?:\n|$)", re.MULTILINE)
+    versionchanged_pattern = re.compile(
+        r"\.\. versionchanged::\s*(.*?)(?:\n|$)", re.MULTILINE
+    )
     if versionchanged_pattern.search(text):
         tags.append("versionchanged")
 
@@ -189,6 +207,11 @@ def _chunk_by_sections(content: str) -> list[tuple[int, int, list[str]]]:
     chunks = []
     current_path: list[tuple[str, int]] = []  # (heading, level)
 
+    # Preserve preamble content before the first section heading.
+    first_heading_line = boundaries[0][0] - 1
+    if first_heading_line > 0:
+        chunks.append((0, first_heading_line, []))
+
     for i, (line_num, heading, underline) in enumerate(boundaries):
         # Update current section path
         level = _get_heading_level(underline)
@@ -200,9 +223,10 @@ def _chunk_by_sections(content: str) -> list[tuple[int, int, list[str]]]:
         # Add current section
         current_path.append((heading, level))
 
-        # Determine chunk boundaries
-        start_line = line_num + 1  # Content starts after underline
-        end_line = boundaries[i + 1][0] if i + 1 < len(boundaries) else len(lines)
+        # Determine chunk boundaries. Include heading + underline in the chunk,
+        # and stop before the next heading line to avoid cross-section bleed.
+        start_line = line_num - 1
+        end_line = boundaries[i + 1][0] - 1 if i + 1 < len(boundaries) else len(lines)
 
         # Extract section path as list of headings
         section_path = [h for h, _ in current_path]

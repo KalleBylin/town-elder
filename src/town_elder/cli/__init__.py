@@ -1,4 +1,5 @@
 """CLI entry point for Town Elder."""
+
 from __future__ import annotations
 
 import hashlib
@@ -59,10 +60,20 @@ def index_callback(
     ),
 ) -> None:
     """Index subcommand: use 'te index --all' for full file indexing, or 'te index files' / 'te index commits' for specific indexing."""
+    if all and ctx.invoked_subcommand is not None:
+        error_console.print(
+            f"[red]Error:[/red] --all cannot be combined with 'te index {ctx.invoked_subcommand}'"
+        )
+        error_console.print(
+            "[dim]Use either 'te index --all' or a specific subcommand.[/dim]"
+        )
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+
     if all:
         # Route to index_files with default path "."
         # Must pass None for exclude since that's the default in index_files
         ctx.invoke(index_files, ctx=ctx, path=".", exclude=None)
+
 
 # Global data directory option - DEPRECATED, use CLIContext instead
 _data_dir: Path | None = None
@@ -156,8 +167,12 @@ def _is_te_hook(content: str) -> bool:
     # First, filter out quoted strings to avoid false positives like:
     # echo "te index commits" -> the string "te index commits" should not match
     # We use a simple approach: remove content within single or double quotes
-    content_without_strings = re.sub(r'"[^"]*"', '', content)  # Remove double-quoted strings
-    content_without_strings = re.sub(r"'[^']*'", '', content_without_strings)  # Remove single-quoted strings
+    content_without_strings = re.sub(
+        r'"[^"]*"', "", content
+    )  # Remove double-quoted strings
+    content_without_strings = re.sub(
+        r"'[^']*'", "", content_without_strings
+    )  # Remove single-quoted strings
 
     # Filter out comment lines to avoid false positives.
     # A line is considered a comment if it starts with # (after stripping leading whitespace)
@@ -183,26 +198,26 @@ def _is_te_hook(content: str) -> bool:
     # - python[3[.x]] -m town_elder --data-dir /path index commits
     patterns = [
         # te index commits (no extra args)
-        r'\bte\s+index\s+commits\b',
+        r"\bte\s+index\s+commits\b",
         # te [args...] index commits (with extra args)
-        r'\bte\s+\S+.*\s+index\s+commits\b',
+        r"\bte\s+\S+.*\s+index\s+commits\b",
         # uv run te index commits (no extra args)
-        r'\buv\s+run\s+te\s+index\s+commits\b',
+        r"\buv\s+run\s+te\s+index\s+commits\b",
         # uv run te [args...] index commits (with extra args)
-        r'\buv\s+run\s+te\s+\S+.*\s+index\s+commits\b',
+        r"\buv\s+run\s+te\s+\S+.*\s+index\s+commits\b",
         # uvx --from town-elder te index commits (no extra args)
-        r'\buvx\s+--from\s+town-elder\s+te\s+index\s+commits\b',
+        r"\buvx\s+--from\s+town-elder\s+te\s+index\s+commits\b",
         # uvx --from town-elder te [args...] index commits (with extra args)
-        r'\buvx\s+--from\s+town-elder\s+te\s+\S+.*\s+index\s+commits\b',
+        r"\buvx\s+--from\s+town-elder\s+te\s+\S+.*\s+index\s+commits\b",
         # python[3[.x]] -m town_elder index commits (no extra args)
         # Matches: python -m town_elder, python3 -m town_elder, python3.11 -m town_elder
-        r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+index\s+commits\b',
+        r"\bpython3?(\.\d+)?\s+-m\s+town_elder\s+index\s+commits\b",
         # python[3[.x]] -m town_elder [args...] index commits (with extra args)
-        r'\bpython3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+index\s+commits\b',
+        r"\bpython3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+index\s+commits\b",
         # /absolute/path/python[3[.x]] -m town_elder index commits (no extra args)
-        r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+index\s+commits\b',
+        r"/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+index\s+commits\b",
         # /absolute/path/python[3[.x]] -m town_elder [args...] index commits (with extra args)
-        r'/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+index\s+commits\b',
+        r"/[^\\s]+/python3?(\.\d+)?\s+-m\s+town_elder\s+\S+.*\s+index\s+commits\b",
     ]
 
     return any(re.search(pattern, non_comment_content) for pattern in patterns)
@@ -276,8 +291,7 @@ def _validate_data_dir_option(data_dir: Path, invoked_subcommand: str | None) ->
         return
 
     error_console.print(
-        "[red]Error: --data-dir does not exist:[/red] "
-        f"{_escape_rich(str(data_dir))}"
+        f"[red]Error: --data-dir does not exist:[/red] {_escape_rich(str(data_dir))}"
     )
     error_console.print(
         "[dim]Use 'te --data-dir <path> init --path <repo>' to create it,[/dim]"
@@ -354,7 +368,9 @@ def _load_index_state(state_file: Path, repo_path: Path) -> tuple[str | None, di
     return last_indexed, state
 
 
-def _save_index_state(state_file: Path, repo_path: Path, frontier_commit_hash: str) -> None:
+def _save_index_state(
+    state_file: Path, repo_path: Path, frontier_commit_hash: str
+) -> None:
     """Save incremental index state, scoped by repository.
 
     Creates or updates the repo-scoped entry in the state file.
@@ -396,9 +412,7 @@ def _save_index_state(state_file: Path, repo_path: Path, frontier_commit_hash: s
     # os.replace is atomic on POSIX systems
     state_json = json.dumps(state)
     temp_fd, temp_path = tempfile.mkstemp(
-        dir=state_file.parent,
-        prefix=".index_state_",
-        suffix=".tmp"
+        dir=state_file.parent, prefix=".index_state_", suffix=".tmp"
     )
     try:
         with os.fdopen(temp_fd, "w") as f:
@@ -446,7 +460,9 @@ def _run_search(
     """Shared implementation for search-style commands."""
     # Validate top_k
     if top_k <= 0:
-        console.print(f"[red]Error:[/red] --top-k must be a positive integer, got {top_k}")
+        console.print(
+            f"[red]Error:[/red] --top-k must be a positive integer, got {top_k}"
+        )
         raise typer.Exit(code=EXIT_ERROR)
 
     with get_cli_services(ctx) as (svc, embedder, store):
@@ -534,8 +550,7 @@ def main(
             resolved_data_dir.resolve()
         except (OSError, ValueError) as e:
             error_console.print(
-                "[red]Error: Invalid --data-dir path:[/red] "
-                f"{_escape_rich(data_dir)}"
+                f"[red]Error: Invalid --data-dir path:[/red] {_escape_rich(data_dir)}"
             )
             error_console.print(f"[dim]{e}[/dim]")
             raise typer.Exit(code=EXIT_ERROR)
@@ -607,23 +622,32 @@ def init(  # noqa: PLR0912
     if force and data_dir.exists():
         # Validate that data_dir is a safe te-managed storage location
         if not _is_safe_te_storage_path(data_dir, init_path):
-            error_console.print(f"[red]Error: Refusing to delete unsafe data-dir path:[/red] {_escape_rich(str(data_dir))}")
-            console.print("[yellow]For safety, --force only allows deletion of te-managed storage:[/yellow]")
+            error_console.print(
+                f"[red]Error: Refusing to delete unsafe data-dir path:[/red] {_escape_rich(str(data_dir))}"
+            )
+            console.print(
+                "[yellow]For safety, --force only allows deletion of te-managed storage:[/yellow]"
+            )
             console.print("  - Default .town_elder directory in the init path")
             console.print("  - Paths explicitly containing '.town_elder' in their name")
             console.print("[dim]Use a safe path or initialize without --force[/dim]")
             raise typer.Exit(code=EXIT_INVALID_ARG)
         import shutil
+
         try:
             shutil.rmtree(data_dir)
         except PermissionError as e:
-            error_console.print(f"[red]Error: Cannot remove existing directory:[/red] {_escape_rich(str(e))}")
+            error_console.print(
+                f"[red]Error: Cannot remove existing directory:[/red] {_escape_rich(str(e))}"
+            )
             raise typer.Exit(code=EXIT_ERROR)
 
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
     except PermissionError as e:
-        error_console.print(f"[red]Error: Cannot create directory:[/red] {_escape_rich(str(e))}")
+        error_console.print(
+            f"[red]Error: Cannot create directory:[/red] {_escape_rich(str(e))}"
+        )
         raise typer.Exit(code=EXIT_ERROR)
 
     try:
@@ -640,10 +664,13 @@ def init(  # noqa: PLR0912
     if install_hook:
         git_dir = _get_common_git_dir(init_path)
         if not git_dir.exists():
-            console.print("[yellow]Warning: Not a git repository, skipping hook installation[/yellow]")
+            console.print(
+                "[yellow]Warning: Not a git repository, skipping hook installation[/yellow]"
+            )
         else:
             try:
                 import os
+
                 hooks_dir = git_dir / "hooks"
                 hook_path = hooks_dir / "post-commit"
 
@@ -651,10 +678,16 @@ def init(  # noqa: PLR0912
 
                 # Check for symlinks - refuse to follow for security
                 if hook_path.is_symlink():
-                    console.print("[yellow]Warning: Hook path is a symlink, skipping installation.[/yellow]")
-                    console.print("[dim]Symlink targets may be outside the hooks directory.[/dim]")
+                    console.print(
+                        "[yellow]Warning: Hook path is a symlink, skipping installation.[/yellow]"
+                    )
+                    console.print(
+                        "[dim]Symlink targets may be outside the hooks directory.[/dim]"
+                    )
                 elif hook_path.exists():
-                    console.print("[yellow]Warning: Hook already exists, skipping. Use 'te hook install --force' to overwrite[/yellow]")
+                    console.print(
+                        "[yellow]Warning: Hook already exists, skipping. Use 'te hook install --force' to overwrite[/yellow]"
+                    )
                 else:
                     # Use absolute path for data_dir to ensure hook works from any directory
                     # Shell-escape the data_dir to prevent injection
@@ -663,13 +696,17 @@ def init(  # noqa: PLR0912
                     hook_content = _build_post_commit_hook_content(data_dir_arg)
                     hook_path.write_text(hook_content)
                     os.chmod(hook_path, 0o755)
-                    console.print(f"[green]Installed post-commit hook at {hook_path}[/green]")
+                    console.print(
+                        f"[green]Installed post-commit hook at {hook_path}[/green]"
+                    )
             except Exception as e:
                 console.print(f"[yellow]Warning: Could not install hook: {e}[/yellow]")
 
     console.print("[dim]You can now use 'te add' to add documents[/dim]")
     if not install_hook:
-        console.print("[dim]Run 'te init --install-hook' to enable automatic commit indexing[/dim]")
+        console.print(
+            "[dim]Run 'te init --install-hook' to enable automatic commit indexing[/dim]"
+        )
 
 
 @app.command()
@@ -825,7 +862,7 @@ def index_files(  # noqa: PLR0912
         help="Additional patterns to exclude (can be specified multiple times)",
     ),
 ) -> None:
-    """Bulk-index .py and .md files from a directory."""
+    """Bulk-index .py, .md, and .rst files from a directory."""
     # Validate path first (before services)
     index_path = Path(path).resolve()
     if not index_path.exists():
@@ -862,8 +899,7 @@ def index_files(  # noqa: PLR0912
                     doc_id = hashlib.sha256(file_path_str.encode()).hexdigest()[:16]
                     vector = embedder.embed_single(text)
                     store.upsert(
-                        doc_id, vector, text,
-                        {"source": str(file), "type": file.suffix}
+                        doc_id, vector, text, {"source": str(file), "type": file.suffix}
                     )
                     indexed_count += 1
                 except UnicodeDecodeError:
@@ -871,7 +907,9 @@ def index_files(  # noqa: PLR0912
                     error_console.print(f"[yellow]Skipped binary file: {file}[/yellow]")
                 except PermissionError:
                     skipped_count += 1
-                    error_console.print(f"[yellow]Skipped unreadable file: {file}[/yellow]")
+                    error_console.print(
+                        f"[yellow]Skipped unreadable file: {file}[/yellow]"
+                    )
                 except Exception as e:
                     skipped_count += 1
                     error_console.print(f"[yellow]Skipped {file}: {e}[/yellow]")
@@ -880,7 +918,9 @@ def index_files(  # noqa: PLR0912
             raise typer.Exit(code=EXIT_ERROR)
 
     if skipped_count > 0:
-        console.print(f"[green]Indexed {indexed_count} files, skipped {skipped_count}[/green]")
+        console.print(
+            f"[green]Indexed {indexed_count} files, skipped {skipped_count}[/green]"
+        )
     else:
         console.print(f"[green]Indexed {indexed_count} files[/green]")
 
@@ -959,7 +999,9 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
             store.close()
             raise typer.Exit(code=0)
         # Fatal error - not an empty repo but a real git error
-        console.print(f"[red]Error fetching commits:[/red] {_escape_rich(error_msg or str(e))}")
+        console.print(
+            f"[red]Error fetching commits:[/red] {_escape_rich(error_msg or str(e))}"
+        )
         store.close()
         raise typer.Exit(code=EXIT_ERROR)
     except Exception as e:
@@ -987,7 +1029,9 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
             # Continue fetching in batches until we find last_indexed or run out
             offset = len(initial_commits)
             while not found_last:
-                more_commits = git.get_commits_with_files_batch(limit=batch_size, offset=offset)
+                more_commits = git.get_commits_with_files_batch(
+                    limit=batch_size, offset=offset
+                )
                 if not more_commits:
                     break
                 for commit in more_commits:
@@ -1010,16 +1054,24 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
             # This means the state file points to a garbage-collected or corrupted commit.
             # We must not do partial indexing with unsafe state advance.
             # Index all available commits (from all batches) but don't advance state.
-            console.print("[yellow]Warning: Last indexed commit not found in history.[/yellow]")
-            console.print("[yellow]This may indicate stale state or garbage-collected commits.[/yellow]")
-            console.print("[yellow]Indexing all available commits without advancing state.[/yellow]")
+            console.print(
+                "[yellow]Warning: Last indexed commit not found in history.[/yellow]"
+            )
+            console.print(
+                "[yellow]This may indicate stale state or garbage-collected commits.[/yellow]"
+            )
+            console.print(
+                "[yellow]Indexing all available commits without advancing state.[/yellow]"
+            )
             # Use filtered (contains all commits from all batches), not just first page
             commits = filtered
     elif all_history:
         # For --all mode, get all commits (may need multiple fetches)
         offset = len(commits)
         while True:
-            more_commits = git.get_commits_with_files_batch(limit=batch_size, offset=offset)
+            more_commits = git.get_commits_with_files_batch(
+                limit=batch_size, offset=offset
+            )
             if not more_commits:
                 break
             commits.extend(more_commits)
@@ -1035,7 +1087,9 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
         store.close()
         return
 
-    console.print(f"[green]Indexing {len(commits)} commits (batch size: {batch_size})...[/green]")
+    console.print(
+        f"[green]Indexing {len(commits)} commits (batch size: {batch_size})...[/green]"
+    )
 
     indexed_count = 0
     skipped_count = 0
@@ -1052,7 +1106,7 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
             TextColumn("({task.completed}/{task.total})"),
             TimeElapsedColumn(),
             TimeRemainingColumn(),
-            console=console
+            console=console,
         ) as progress:
             task = progress.add_task("Indexing commits", total=len(commits))
 
@@ -1077,7 +1131,9 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
                         text = f"Commit: {commit.message}\n\n{diff_text}"
                         commit_data.append((commit, text))
                     except Exception as e:
-                        error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                        error_console.print(
+                            f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]"
+                        )
                         skipped_count += 1
                         progress.advance(task)
 
@@ -1087,7 +1143,9 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
                     embeddings = list(embedder.embed(texts))
 
                     # Insert embeddings into store
-                    for (commit, text), vector in zip(commit_data, embeddings, strict=True):
+                    for (commit, text), vector in zip(
+                        commit_data, embeddings, strict=True
+                    ):
                         doc_id = f"commit_{commit.hash}"
                         # Check if document already exists to handle duplicates gracefully
                         existing = store.get(doc_id)
@@ -1099,19 +1157,23 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
                         else:
                             try:
                                 store.insert(
-                                    doc_id, vector, text,
+                                    doc_id,
+                                    vector,
+                                    text,
                                     {
                                         "type": "commit",
                                         "hash": commit.hash,
                                         "author": commit.author,
                                         "message": commit.message,
-                                    }
+                                    },
                                 )
                                 indexed_count += 1
                                 if not frontier_blocked:
                                     frontier_commit_hash = commit.hash
                             except Exception as e:
-                                error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                                error_console.print(
+                                    f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]"
+                                )
                                 skipped_count += 1
                                 frontier_blocked = True
                         progress.advance(task)
@@ -1131,7 +1193,9 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
         _save_index_state(state_file, repo_path, frontier_commit_hash)
 
     if skipped_count > 0:
-        console.print(f"[green]Indexed {indexed_count} commits, skipped {skipped_count}[/green]")
+        console.print(
+            f"[green]Indexed {indexed_count} commits, skipped {skipped_count}[/green]"
+        )
     else:
         console.print(f"[green]Indexed {indexed_count} commits[/green]")
 
@@ -1183,8 +1247,9 @@ def index_commits(  # noqa: PLR0912, PLR0913
 
     Parses commit messages and diffs to create searchable commit history.
     """
-    _run_commit_index(ctx, path, limit, all_history, batch_size, max_diff_size, incremental, force)
-
+    _run_commit_index(
+        ctx, path, limit, all_history, batch_size, max_diff_size, incremental, force
+    )
 
 
 hook_app = typer.Typer(name="hook", help="Manage git hooks for automatic indexing")
@@ -1220,8 +1285,12 @@ def install(
 
     # Check if it's a symlink - refuse to follow symlinks for security
     if hook_path.is_symlink():
-        error_console.print(f"[red]Error: Refusing to install hook over symlink: {hook_path}[/red]")
-        console.print("[yellow]Symlink targets may be outside the hooks directory.[/yellow]")
+        error_console.print(
+            f"[red]Error: Refusing to install hook over symlink: {hook_path}[/red]"
+        )
+        console.print(
+            "[yellow]Symlink targets may be outside the hooks directory.[/yellow]"
+        )
         console.print("Remove the symlink first, then install the hook.")
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
@@ -1229,7 +1298,9 @@ def install(
     if hook_path.exists() and force:
         existing_content = _safe_read_hook(hook_path)
         if existing_content is None or not _is_te_hook(existing_content):
-            error_console.print("[yellow]Warning: Existing hook is not a Town Elder hook[/yellow]")
+            error_console.print(
+                "[yellow]Warning: Existing hook is not a Town Elder hook[/yellow]"
+            )
             console.print("Use --force to overwrite anyway")
 
     # Get the data directory from context (invocation-scoped)
@@ -1249,7 +1320,7 @@ def install(
     # Shell-escape the data_dir to prevent injection
     # Always include --data-dir to support env var configuration (TOWN_ELDER_DATA_DIR)
     escaped_data_dir = shlex.quote(str(config.data_dir.resolve()))
-    data_dir_arg = f'--data-dir {escaped_data_dir}'
+    data_dir_arg = f"--data-dir {escaped_data_dir}"
     hook_content = _build_post_commit_hook_content(data_dir_arg)
 
     hook_path.write_text(hook_content)
@@ -1264,7 +1335,9 @@ def install(
 @hook_app.command()
 def uninstall(
     path: str = typer.Option(".", "--repo", "-r", help="Git repository path"),
-    force: bool = typer.Option(False, "--force", "-f", help="Allow deletion of non-Town Elder hooks"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Allow deletion of non-Town Elder hooks"
+    ),
 ) -> None:
     """Remove post-commit hook."""
     repo_path = Path(path).resolve()
@@ -1277,7 +1350,9 @@ def uninstall(
         raise typer.Exit(code=EXIT_ERROR)
 
     if not hook_path.exists():
-        error_console.print(f"[yellow]No post-commit hook found at {hook_path}[/yellow]")
+        error_console.print(
+            f"[yellow]No post-commit hook found at {hook_path}[/yellow]"
+        )
         return
 
     # Check if it's a Town Elder hook
@@ -1285,12 +1360,16 @@ def uninstall(
     is_te_hook = content is not None and _is_te_hook(content)
 
     if not is_te_hook and not force:
-        error_console.print("[red]Error: Hook exists but is not a Town Elder hook[/red]")
+        error_console.print(
+            "[red]Error: Hook exists but is not a Town Elder hook[/red]"
+        )
         console.print("[yellow]Use --force to delete non-Town Elder hooks[/yellow]")
         raise typer.Exit(code=EXIT_ERROR)
 
     if not is_te_hook and force:
-        error_console.print("[yellow]Warning: Deleting non-Town Elder hook (--force specified)[/yellow]")
+        error_console.print(
+            "[yellow]Warning: Deleting non-Town Elder hook (--force specified)[/yellow]"
+        )
 
     hook_path.unlink()
     console.print("[green]Removed post-commit hook[/green]")
@@ -1363,7 +1442,9 @@ def export(  # noqa: PLR0912
 
     # Validate format
     if format not in ("json", "jsonl"):
-        error_console.print(f"[red]Error: Invalid format '{format}'. Use 'json' or 'jsonl'.[/red]")
+        error_console.print(
+            f"[red]Error: Invalid format '{format}'. Use 'json' or 'jsonl'.[/red]"
+        )
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     with get_cli_services(ctx, include_embedder=False) as (svc, embedder, store):
@@ -1386,7 +1467,9 @@ def export(  # noqa: PLR0912
     else:
         try:
             Path(output).write_text(output_data)
-            console.print(f"[green]Exported {len(documents)} documents to {output}[/green]")
+            console.print(
+                f"[green]Exported {len(documents)} documents to {output}[/green]"
+            )
         except Exception as e:
             console.print(f"[red]Error writing to file:[/red] {_escape_rich(str(e))}")
             raise typer.Exit(code=EXIT_ERROR)

@@ -152,7 +152,7 @@ Start from scratch and build semantic memory as you develop.
 $ uv run te init
 Initialized Town Elder database at /path/to/project/.town_elder
 
-# Index your codebase (Python and Markdown files)
+# Index your codebase (Python, Markdown, and reStructuredText files)
 $ uv run te index --all
 Indexing 42 files...
 Indexed 42 files
@@ -218,8 +218,8 @@ Commands are shown with `uv run te`. You can use `uvx --from town-elder te` equi
 |---------|-------------|
 | `uv run te init` | Initialize a Town Elder database in the current directory |
 | `uv run te add` | Add a document with optional metadata |
-| `uv run te index --all` | Index all `.py` and `.md` files in current directory (full repository file indexing) |
-| `uv run te index files [PATH]` | Index all `.py` and `.md` files in a specific directory |
+| `uv run te index --all` | Index all `.py`, `.md`, and `.rst` files in current directory (full repository file indexing) |
+| `uv run te index files [PATH]` | Index all `.py`, `.md`, and `.rst` files in a specific directory |
 | `uv run te index commits` | Index git commits from a repository |
 | `uv run te search` | Search indexed documents semantically |
 | `uv run te stats` | Show document count and configuration |
@@ -256,7 +256,7 @@ your-project/
 
 - **Embedding model**: Fastembed (BAAI/bge-small-en-v1.5, 384 dimensions)
 - **Data location**: `.town_elder/` in your project directory
-- **Indexed file types**: `.py` and `.md` files
+- **Indexed file types**: `.py`, `.md`, and `.rst` files
 
 Configuration is managed via environment variables or `pyproject.toml`. See `town_elder.config` for available options.
 

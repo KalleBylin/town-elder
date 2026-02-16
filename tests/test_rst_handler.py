@@ -1,4 +1,5 @@
 """Tests for RST parser module."""
+
 from __future__ import annotations
 
 import tempfile
@@ -88,6 +89,15 @@ Content two."""
 No headings here."""
         boundaries = _find_section_boundaries(content)
         assert len(boundaries) == 0
+
+    def test_mixed_underline_characters_not_treated_as_heading(self):
+        """Underline must be one repeated heading character."""
+        content = """Title
+=-=
+
+Body text."""
+        boundaries = _find_section_boundaries(content)
+        assert boundaries == []
 
 
 class TestChunkBySections:
@@ -258,6 +268,30 @@ Content one."""
         # First chunk should have section path
         assert len(chunks[0].section_path) >= 1
 
+    def test_parse_rst_section_chunks_do_not_bleed_next_heading(self):
+        """Each section chunk should stop before the next section heading."""
+        content = """Main Title
+============
+
+Section A
+---------
+
+Content A.
+
+Section B
+---------
+
+Content B."""
+        chunks = parse_rst_content(content)
+
+        section_a_chunks = [
+            chunk.text
+            for chunk in chunks
+            if "Section A" in chunk.text and "Content A." in chunk.text
+        ]
+        assert len(section_a_chunks) == 1
+        assert "Section B" not in section_a_chunks[0]
+
     def test_parse_rst_extracts_directives(self):
         """Test that parsing extracts directives."""
         content = """Title
@@ -303,9 +337,7 @@ class TestParseRstFile:
 =======
 
 Content here."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".rst", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".rst", delete=False) as f:
             f.write(content)
             f.flush()
             chunks = parse_rst_file(f.name)
