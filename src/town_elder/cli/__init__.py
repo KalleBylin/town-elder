@@ -860,6 +860,320 @@ def index(  # noqa: PLR0912
         console.print(f"[green]Indexed {indexed_count} files (excluded {len(excluded_files)})[/green]")
 
 
+# Index subcommand group (files and commits)
+index_app = typer.Typer(name="index", help="Index files or commits into the vector store")
+app.add_typer(index_app, name="index")
+
+
+@index_app.command("commits")
+def index_commits(  # noqa: PLR0912, PLR0913
+    ctx: typer.Context,
+    path: str = typer.Option(
+        ".",
+        "--repo",
+        "-r",
+        help="Git repository path (default: current directory)",
+    ),
+    limit: int = typer.Option(
+        100,
+        "--limit",
+        "-n",
+        help="Number of commits to index (default: 100, use --all for full history)",
+    ),
+    all_history: bool = typer.Option(
+        False,
+        "--all",
+        help="Index all commits in history (overrides --limit)",
+    ),
+    batch_size: int = typer.Option(
+        500,
+        "--batch-size",
+        "-b",
+        help="Number of commits to process per batch (default: 500)",
+    ),
+    max_diff_size: int = typer.Option(
+        100 * 1024,
+        "--max-diff-size",
+        help="Maximum diff size in bytes (default: 102400)",
+    ),
+    mode: str = typer.Option(
+        "incremental",
+        "--mode",
+        "-m",
+        help="Indexing mode: 'incremental' (only new commits) or 'full' (all commits)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Force re-indexing of all commits, ignoring last indexed state",
+    ),
+) -> None:
+    """Index git commits from a repository.
+
+    Parses commit messages and diffs to create searchable commit history.
+    """
+    # Validate mode
+    if mode not in ("incremental", "full"):
+        error_console.print("[red]Error: --mode must be 'incremental' or 'full'[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+    incremental = mode == "incremental"
+
+    # Call the main commit_index logic
+    _run_commit_index(ctx, path, limit, all_history, batch_size, max_diff_size, incremental, force)
+
+
+def _run_commit_index(
+    ctx: typer.Context,
+    path: str,
+    limit: int,
+    all_history: bool,
+    batch_size: int,
+    max_diff_size: int,
+    incremental: bool,
+    force: bool,
+) -> None:
+    """Shared implementation for commit indexing."""
+    # Validate database is initialized first
+    config = require_initialized(ctx)
+
+    # Validate repo path second
+    repo_path = Path(path).resolve()
+
+    # Use git to find the repo root - this handles subdirectories correctly
+    repo_root = _get_git_repo_root(repo_path)
+
+    # If git rev-parse failed, check for .git as a fallback (handles test mocks)
+    if repo_root is None:
+        if (repo_path / ".git").exists():
+            # Has .git but git command failed - use path as-is
+            pass
+        else:
+            error_console.print(f"[red]Error: Not a git repository: {path}[/red]")
+            console.print("[dim]Ensure the path is inside a git repository[/dim]")
+            raise typer.Exit(code=EXIT_INVALID_ARG)
+    # If path is a subdirectory, use the repo root
+    elif repo_root != repo_path:
+        repo_path = repo_root
+
+    if limit <= 0:
+        error_console.print("[red]Error: --limit must be greater than 0[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+    if batch_size <= 0:
+        error_console.print("[red]Error: --batch-size must be greater than 0[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+    if max_diff_size <= 0:
+        error_console.print("[red]Error: --max-diff-size must be greater than 0[/red]")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
+
+    state_file = config.data_dir / "index_state.json"
+
+    # Load last indexed commit from state file (repo-scoped)
+    last_indexed = None
+    if incremental and not force:
+        last_indexed, _ = _load_index_state(state_file, repo_path)
+
+    # Get services
+    svc = CLIServiceContext(ctx)
+    try:
+        git = svc.create_git_runner(repo_path)
+        embedder = svc.create_embedder()
+        store = svc.create_vector_store()
+        diff_parser = svc.create_diff_parser()
+    except ServiceInitError as e:
+        console.print(f"[red]Error initializing services:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+
+    try:
+        initial_limit = batch_size if all_history else limit
+        # Get commits using batch mode (with files in single call)
+        initial_commits = git.get_commits_with_files_batch(limit=initial_limit)
+    except subprocess.CalledProcessError as e:
+        # Check for empty repository (exit code 128 can mean no commits OR fatal error)
+        # We must check the error message to distinguish between them
+        error_msg = e.stderr.strip() if e.stderr else ""
+        if e.returncode == GIT_ERROR_EXIT_CODE and _is_empty_repo_error(error_msg):
+            console.print("[yellow]No commits to index.[/yellow]")
+            store.close()
+            raise typer.Exit(code=0)
+        # Fatal error - not an empty repo but a real git error
+        console.print(f"[red]Error fetching commits:[/red] {_escape_rich(error_msg or str(e))}")
+        store.close()
+        raise typer.Exit(code=EXIT_ERROR)
+    except Exception as e:
+        console.print(f"[red]Error fetching commits:[/red] {_escape_rich(str(e))}")
+        store.close()
+        raise typer.Exit(code=EXIT_ERROR)
+
+    # Filter commits if using incremental mode
+    commits = initial_commits
+    sentinel_found = True  # Assume found unless we determine otherwise
+    if incremental and last_indexed and not force:
+        # Find the position of last indexed commit
+        found_last = False
+        filtered = []
+        for commit in initial_commits:
+            if commit.hash == last_indexed:
+                found_last = True
+                break
+            filtered.append(commit)
+        # If we didn't find the last indexed commit, we may have a backlog
+        # Fetch more commits until we find it or exhaust all
+        if not found_last:
+            # Sentinel not found - this is a stale/missing state situation
+            sentinel_found = False
+            # Continue fetching in batches until we find last_indexed or run out
+            offset = len(initial_commits)
+            while not found_last:
+                more_commits = git.get_commits_with_files_batch(limit=batch_size, offset=offset)
+                if not more_commits:
+                    break
+                for commit in more_commits:
+                    if commit.hash == last_indexed:
+                        found_last = True
+                        sentinel_found = True
+                        break
+                    filtered.append(commit)
+                offset += len(more_commits)
+                if found_last:
+                    break
+                # Check if we've reached the end
+                if len(more_commits) < batch_size:
+                    break
+        # If we found the last indexed commit, only index newer ones
+        if found_last:
+            commits = filtered
+        else:
+            # Sentinel still not found after exhausting all commits.
+            # This means the state file points to a garbage-collected or corrupted commit.
+            # We must not do partial indexing with unsafe state advance.
+            # Index all available commits (from all batches) but don't advance state.
+            console.print("[yellow]Warning: Last indexed commit not found in history.[/yellow]")
+            console.print("[yellow]This may indicate stale state or garbage-collected commits.[/yellow]")
+            console.print("[yellow]Indexing all available commits without advancing state.[/yellow]")
+            # Use filtered (contains all commits from all batches), not just first page
+            commits = filtered
+    elif all_history:
+        # For --all mode, get all commits (may need multiple fetches)
+        offset = len(commits)
+        while True:
+            more_commits = git.get_commits_with_files_batch(limit=batch_size, offset=offset)
+            if not more_commits:
+                break
+            commits.extend(more_commits)
+            offset += len(more_commits)
+            if len(more_commits) < batch_size:
+                break
+
+    # Reverse to index from oldest to newest
+    commits = list(reversed(commits))
+
+    if not commits:
+        console.print("[green]No new commits to index[/green]")
+        store.close()
+        return
+
+    console.print(f"[green]Indexing {len(commits)} commits (batch size: {batch_size})...[/green]")
+
+    indexed_count = 0
+    skipped_count = 0
+    frontier_commit_hash: str | None = None
+    frontier_blocked = False
+
+    # Process commits in batches
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("({task.completed}/{task.total})"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console
+        ) as progress:
+            task = progress.add_task("Indexing commits", total=len(commits))
+
+            for batch_start in range(0, len(commits), batch_size):
+                batch_end = min(batch_start + batch_size, len(commits))
+                batch_commits = commits[batch_start:batch_end]
+
+                # Batch fetch diffs for all commits in this batch
+                commit_hashes = [c.hash for c in batch_commits]
+                diffs = git.get_diffs_batch(commit_hashes, max_size=max_diff_size)
+
+                # Prepare all commit data for batch embedding
+                commit_data: list[tuple[object, str]] = []
+                for commit in batch_commits:
+                    try:
+                        diff = diffs.get(commit.hash, "")
+                        diff_text = diff_parser.parse_diff_to_text(diff)
+
+                        if "[truncated" in diff:
+                            diff_text += " [diff was truncated due to size]"
+
+                        text = f"Commit: {commit.message}\n\n{diff_text}"
+                        commit_data.append((commit, text))
+                    except Exception as e:
+                        error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                        skipped_count += 1
+                        progress.advance(task)
+
+                # Batch generate embeddings for all valid commits in this batch
+                if commit_data:
+                    texts = [text for _, text in commit_data]
+                    embeddings = list(embedder.embed(texts))
+
+                    # Insert embeddings into store
+                    for (commit, text), vector in zip(commit_data, embeddings, strict=True):
+                        doc_id = f"commit_{commit.hash}"
+                        # Check if document already exists to handle duplicates gracefully
+                        existing = store.get(doc_id)
+                        if existing is not None:
+                            # Already indexed - treat as success for state advancement
+                            indexed_count += 1
+                            if not frontier_blocked:
+                                frontier_commit_hash = commit.hash
+                        else:
+                            try:
+                                store.insert(
+                                    doc_id, vector, text,
+                                    {
+                                        "type": "commit",
+                                        "hash": commit.hash,
+                                        "author": commit.author,
+                                        "message": commit.message,
+                                    }
+                                )
+                                indexed_count += 1
+                                if not frontier_blocked:
+                                    frontier_commit_hash = commit.hash
+                            except Exception as e:
+                                error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                                skipped_count += 1
+                                frontier_blocked = True
+                        progress.advance(task)
+
+                # Save checkpoint after each batch (resumable)
+                if frontier_commit_hash and sentinel_found:
+                    _save_index_state(state_file, repo_path, frontier_commit_hash)
+
+    except Exception as e:
+        console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
+        raise typer.Exit(code=EXIT_ERROR)
+    finally:
+        store.close()
+
+    # Save final state
+    if frontier_commit_hash and sentinel_found:
+        _save_index_state(state_file, repo_path, frontier_commit_hash)
+
+    if skipped_count > 0:
+        console.print(f"[green]Indexed {indexed_count} commits, skipped {skipped_count}[/green]")
+    else:
+        console.print(f"[green]Indexed {indexed_count} commits[/green]")
+
+
 @app.command()
 def commit_index(  # noqa: PLR0912, PLR0913
     ctx: typer.Context,
@@ -1295,14 +1609,6 @@ def hook_status(
 
 
 app.add_typer(hook_app, name="hook")
-
-
-# Backward compatibility: 'te commit-index' is now 'te index commits'
-# Keep the old command as a deprecated alias
-@app.command("commit-index", deprecated=True)
-def _commit_index_compat() -> None:
-    """[DEPRECATED] Use 'te index commits' instead."""
-    raise typer.Exit(code=EXIT_INVALID_ARG)
 
 
 @app.command()
