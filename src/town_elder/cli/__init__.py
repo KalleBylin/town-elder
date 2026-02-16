@@ -473,10 +473,9 @@ def init(  # noqa: PLR0912
                 if hook_path.exists():
                     console.print("[yellow]Warning: Hook already exists, skipping. Use 'te hook install --force' to overwrite[/yellow]")
                 else:
-                    # Use a fallback chain: uv run te -> te -> python -m town_elder
-                    # This ensures the hook works even if uv is not installed
+                    # Use absolute path for data_dir to ensure hook works from any directory
                     # Shell-escape the data_dir to prevent injection
-                    escaped_data_dir = shlex.quote(str(data_dir))
+                    escaped_data_dir = shlex.quote(str(Path(data_dir).resolve()))
                     hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
 # Try uv first, then te, then python -m town_elder
@@ -1025,7 +1024,7 @@ def install(
     # This ensures the hook works even if uv is not installed
     # Shell-escape the data_dir to prevent injection
     if data_dir:
-        escaped_data_dir = shlex.quote(str(config.data_dir))
+        escaped_data_dir = shlex.quote(str(config.data_dir.resolve()))
         data_dir_arg = f'--data-dir {escaped_data_dir}'
         hook_content = f"""#!/bin/sh
 # Town Elder post-commit hook - automatically indexes commits
