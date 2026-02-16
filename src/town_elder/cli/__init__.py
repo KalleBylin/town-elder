@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import typer
@@ -773,6 +774,15 @@ def commit_index(  # noqa: PLR0912, PLR0913
         initial_limit = batch_size if all_history else limit
         # Get commits using batch mode (with files in single call)
         initial_commits = git.get_commits_with_files_batch(limit=initial_limit)
+    except subprocess.CalledProcessError as e:
+        # Check for empty repository (exit code 128 typically means no commits or fatal error)
+        if e.returncode == 128:
+            console.print("[yellow]No commits to index.[/yellow]")
+            store.close()
+            raise typer.Exit(code=0)
+        console.print(f"[red]Error fetching commits:[/red] {_escape_rich(str(e))}")
+        store.close()
+        raise typer.Exit(code=EXIT_ERROR)
     except Exception as e:
         console.print(f"[red]Error fetching commits:[/red] {_escape_rich(str(e))}")
         store.close()
