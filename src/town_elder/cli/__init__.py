@@ -895,26 +895,33 @@ def commit_index(  # noqa: PLR0912, PLR0913
 
                     # Insert embeddings into store
                     for (commit, text), vector in zip(commit_data, embeddings, strict=True):
-                        try:
-                            doc_id = f"commit_{commit.hash}"
-                            store.insert(
-                                doc_id, vector, text,
-                                {
-                                    "type": "commit",
-                                    "hash": commit.hash,
-                                    "author": commit.author,
-                                    "message": commit.message,
-                                }
-                            )
+                        doc_id = f"commit_{commit.hash}"
+                        # Check if document already exists to handle duplicates gracefully
+                        existing = store.get(doc_id)
+                        if existing is not None:
+                            # Already indexed - treat as success for state advancement
                             indexed_count += 1
                             if not frontier_blocked:
                                 frontier_commit_hash = commit.hash
-                        except Exception as e:
-                            error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
-                            skipped_count += 1
-                            frontier_blocked = True
-                        finally:
-                            progress.advance(task)
+                        else:
+                            try:
+                                store.insert(
+                                    doc_id, vector, text,
+                                    {
+                                        "type": "commit",
+                                        "hash": commit.hash,
+                                        "author": commit.author,
+                                        "message": commit.message,
+                                    }
+                                )
+                                indexed_count += 1
+                                if not frontier_blocked:
+                                    frontier_commit_hash = commit.hash
+                            except Exception as e:
+                                error_console.print(f"[yellow]Skipped commit {commit.hash[:8]}: {e}[/yellow]")
+                                skipped_count += 1
+                                frontier_blocked = True
+                        progress.advance(task)
 
                 # Save checkpoint after each batch (resumable)
                 if frontier_commit_hash and sentinel_found:

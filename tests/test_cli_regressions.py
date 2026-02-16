@@ -121,6 +121,13 @@ class _FakeStore:
     def __init__(self, controller: _StoreController):
         self._controller = controller
 
+    def get(self, doc_id: str) -> dict | None:
+        # Extract commit hash from doc_id (format: "commit_{hash}")
+        commit_hash = doc_id.replace("commit_", "")
+        if commit_hash in self._controller.indexed_hashes:
+            return {"hash": commit_hash}  # Document exists
+        return None  # Document does not exist
+
     def insert(
         self,
         doc_id: str,
