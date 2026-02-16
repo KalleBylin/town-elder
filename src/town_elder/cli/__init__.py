@@ -763,7 +763,12 @@ def status(ctx: typer.Context) -> None:
 @app.command()
 def index(  # noqa: PLR0912
     ctx: typer.Context,
-    path: str = typer.Argument(".", help="Path to directory to index (default: current directory)"),
+    path: str = typer.Option(
+        ".",
+        "--path",
+        "-p",
+        help="Path to directory to index (default: current directory)",
+    ),
     exclude: list[str] = typer.Option(
         None,
         "--exclude",
