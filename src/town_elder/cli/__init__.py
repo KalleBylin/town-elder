@@ -419,8 +419,28 @@ def main(
         console.print(f"te version {__version__}")
         raise typer.Exit(code=EXIT_SUCCESS)
 
+    # Validate data_dir if provided
+    if data_dir:
+        data_dir_path = Path(data_dir)
+        try:
+            # Expand user path to catch invalid paths early
+            expanded = data_dir_path.expanduser()
+            # Resolve to get absolute path, catching invalid paths
+            expanded.resolve()
+        except (OSError, ValueError) as e:
+            error_console.print(f"[red]Error: Invalid --data-dir path:[/red] {_escape_rich(data_dir)}")
+            error_console.print(f"[dim]{e}[/dim]")
+            raise typer.Exit(code=EXIT_INVALID_ARG)
+
+        # Check for null bytes (common path injection)
+        if '\0' in data_dir:
+            error_console.print(f"[red]Error: Invalid --data-dir path (contains null byte):[/red] {_escape_rich(data_dir)}")
+            raise typer.Exit(code=EXIT_INVALID_ARG)
+
+        data_dir = expanded
+
     # Use invocation-scoped context instead of global to prevent data-dir leakage
-    ctx.obj = CLIContext(data_dir=Path(data_dir).expanduser() if data_dir else None)
+    ctx.obj = CLIContext(data_dir=data_dir)
 
     if ctx.invoked_subcommand is None:
         console.print("[bold]Town Elder[/bold] - Semantic memory CLI")
