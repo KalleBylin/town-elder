@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from town_elder.embeddings.embedder import Embedder
 from town_elder.git.diff_parser import DiffFile, DiffParser
@@ -10,6 +11,9 @@ from town_elder.storage.vector_store import ZvecStore
 # Test constants
 _DEFAULT_EMBED_DIMENSION = 384
 _ALT_EMBED_DIMENSION = 256  # Used for testing schema mismatch
+_BASE_MODEL_DIMENSION = 768
+_LARGE_MODEL_DIMENSION = 1024
+_CUSTOM_DIMENSION = 512
 _DEFAULT_TOP_K = 5
 _MIN_TOP_K = 2
 _MAX_TOP_K = 5
@@ -34,6 +38,51 @@ class TestEmbedder:
         """Test that dimension property returns correct value."""
         embedder = Embedder()
         assert embedder.dimension == _DEFAULT_EMBED_DIMENSION
+
+    def test_embedder_with_config_dimension(self):
+        """Test that Embedder reads dimension from config parameter."""
+        custom_dim = 768
+        embedder = Embedder(
+            model_name="BAAI/bge-base-en-v1.5",
+            embed_dimension=custom_dim,
+        )
+        assert embedder.dimension == custom_dim
+
+    def test_embedder_config_dimension_mismatch_raises(self):
+        """Test that Embedder raises on config/model dimension mismatch."""
+        # bge-small-en-v1.5 has dimension 384, but we pass 768
+        with pytest.raises(ValueError) as exc_info:
+            Embedder(
+                model_name="BAAI/bge-small-en-v1.5",
+                embed_dimension=768,
+            )
+        assert "does not match expected dimension" in str(exc_info.value)
+        assert "384" in str(exc_info.value)
+
+    def test_embedder_config_dimension_matches_model(self):
+        """Test that Embedder accepts matching config dimension."""
+        # bge-base-en-v1.5 has dimension 768
+        embedder = Embedder(
+            model_name="BAAI/bge-base-en-v1.5",
+            embed_dimension=_BASE_MODEL_DIMENSION,
+        )
+        assert embedder.dimension == _BASE_MODEL_DIMENSION
+
+    def test_embedder_large_model_dimension(self):
+        """Test that large model dimension is correctly read."""
+        embedder = Embedder(
+            model_name="BAAI/bge-large-en-v1.5",
+            embed_dimension=_LARGE_MODEL_DIMENSION,
+        )
+        assert embedder.dimension == _LARGE_MODEL_DIMENSION
+
+    def test_embedder_unknown_model_uses_provided_dimension(self):
+        """Test that unknown model uses provided dimension without validation."""
+        embedder = Embedder(
+            model_name="custom-unknown-model",
+            embed_dimension=_CUSTOM_DIMENSION,
+        )
+        assert embedder.dimension == _CUSTOM_DIMENSION
 
     def test_embed_single(self):
         """Test embedding a single text returns a vector."""

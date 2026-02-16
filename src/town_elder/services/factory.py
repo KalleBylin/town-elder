@@ -22,7 +22,10 @@ class ServiceFactory:
         Returns:
             An Embedder configured from the app config.
         """
-        return Embedder(model_name=self._config.embed_model)
+        return Embedder(
+            model_name=self._config.embed_model,
+            embed_dimension=self._config.embed_dimension,
+        )
 
     def create_vector_store(self) -> ZvecStore:
         """Create a ZvecStore instance.

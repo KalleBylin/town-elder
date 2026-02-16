@@ -37,7 +37,10 @@ def mock_config(temp_dir: Path) -> TownElderConfig:
 @pytest.fixture
 def sample_embedder() -> Embedder:
     """Create a sample embedder instance."""
-    return Embedder(model_name="BAAI/bge-small-en-v1.5")
+    return Embedder(
+        model_name="BAAI/bge-small-en-v1.5",
+        embed_dimension=384,
+    )
 
 
 @pytest.fixture
