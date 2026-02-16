@@ -582,8 +582,11 @@ def init(  # noqa: PLR0912
 
                 hooks_dir.mkdir(parents=True, exist_ok=True)
 
-                # Check if hook already exists
-                if hook_path.exists():
+                # Check for symlinks - refuse to follow for security
+                if hook_path.is_symlink():
+                    console.print("[yellow]Warning: Hook path is a symlink, skipping installation.[/yellow]")
+                    console.print("[dim]Symlink targets may be outside the hooks directory.[/dim]")
+                elif hook_path.exists():
                     console.print("[yellow]Warning: Hook already exists, skipping. Use 'te hook install --force' to overwrite[/yellow]")
                 else:
                     # Use absolute path for data_dir to ensure hook works from any directory
@@ -1133,6 +1136,13 @@ def install(
         error_console.print(f"[yellow]Hook already exists at {hook_path}[/yellow]")
         console.print("Use --force to overwrite, or run 'te hook uninstall' first")
         raise typer.Exit(code=EXIT_ERROR)
+
+    # Check if it's a symlink - refuse to follow symlinks for security
+    if hook_path.is_symlink():
+        error_console.print(f"[red]Error: Refusing to install hook over symlink: {hook_path}[/red]")
+        console.print("[yellow]Symlink targets may be outside the hooks directory.[/yellow]")
+        console.print("Remove the symlink first, then install the hook.")
+        raise typer.Exit(code=EXIT_INVALID_ARG)
 
     # Check if it's a Town Elder hook (ours or someone else's)
     if hook_path.exists() and force:
