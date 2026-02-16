@@ -19,9 +19,16 @@ class QueryService:
         self.embedder = embedder or Embedder(model_name=config.embed_model, embed_dimension=config.embed_dimension)
 
     def search(self, query: str, top_k: int | None = None) -> list[dict]:
-        """Search for documents similar to the query."""
+        """Search for documents similar to the query.
+
+        Args:
+            query: The search query string.
+            top_k: Number of results to return. If None, uses default from config.
+                   If explicitly set to 0, returns no results (empty list).
+        """
         config = get_config()
-        top_k = top_k or config.default_top_k
+        if top_k is None:
+            top_k = config.default_top_k
 
         query_vector = self.embedder.embed_single(query)
         return self.store.search(query_vector, top_k=top_k)
