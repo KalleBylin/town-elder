@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shlex
+import shutil
 import subprocess
 from itertools import chain
 from pathlib import Path
