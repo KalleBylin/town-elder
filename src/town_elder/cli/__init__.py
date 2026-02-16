@@ -5,6 +5,7 @@ import hashlib
 import json
 import shlex
 import subprocess
+from itertools import chain
 from pathlib import Path
 
 import typer
@@ -648,11 +649,19 @@ def index(  # noqa: PLR0912
             return False
 
         # Find all text files with exclusion filtering
-        all_files = list(index_path.rglob("*.py")) + list(index_path.rglob("*.md"))
-        excluded_files = [f for f in all_files if should_exclude(f)]
-        files_to_index = [f for f in all_files if not should_exclude(f)]
+        # Use chain.from_iterable to lazily combine glob results without materializing
+        # full lists in memory - important for large repositories
+        all_files = chain.from_iterable([index_path.rglob("*.py"), index_path.rglob("*.md")])
+        # Single-pass filtering to avoid multiple iterations over the file list
+        files_to_index = []
+        excluded_files = []
+        for f in all_files:
+            if should_exclude(f):
+                excluded_files.append(f)
+            else:
+                files_to_index.append(f)
 
-        console.print(f"[green]Indexing {len(files_to_index)} files (attempted {len(all_files)}, excluded {len(excluded_files)})...[/green]")
+        console.print(f"[green]Indexing {len(files_to_index)} files (attempted {len(files_to_index) + len(excluded_files)}, excluded {len(excluded_files)})...[/green]")
 
         indexed_count = 0
         skipped_count = 0
