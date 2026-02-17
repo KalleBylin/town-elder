@@ -9,11 +9,17 @@ license.workspace = true
 name = "te"
 path = "main.rs"
 
+[lib]
+name = "te_core_py"
+path = "lib.rs"
+crate-type = ["cdylib"]
+
 [features]
 default = []
-python = ["te-core/python"]
+python = ["dep:pyo3", "te-core/python"]
 
 [dependencies]
-te-core = { workspace = true, features = ["python"] }
+te-core = { workspace = true }
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
 clap = { workspace = true }
 env_logger = "0.11"

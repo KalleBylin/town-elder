@@ -98,7 +98,7 @@ maturin build --release
 export PYTHON_SYS_EXECUTABLE=$(which python3)
 
 # Build using maturin
- maturin develop --manifest-path rust/Cargo.toml
+ maturin develop --manifest-path rust/src/Cargo.toml
 ```
 
 ## Python Integration

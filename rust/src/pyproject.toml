@@ -10,4 +10,5 @@ version = "0.1.0"
 manifest-path = "Cargo.toml"
 features = ["python"]
 module-name = "town_elder._te_core"
+python-source = "../../src"
 target-dir = "../target"

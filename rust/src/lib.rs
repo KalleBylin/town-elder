@@ -1,10 +1,14 @@
+#![cfg(feature = "python")]
+
 //! PyO3 module entrypoint for town_elder
 //!
 //! This module provides Python bindings for the te-core Rust crate.
 //! The module is exposed as `town_elder._te_core`.
 
 use pyo3::prelude::*;
+use pyo3::types::PyBool;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Python representation of a tracked file.
 #[pyclass]
@@ -84,12 +88,12 @@ impl PyDiffParser {
 #[pymodule]
 pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Re-export functions from te-core
-    m.add_function(wrap_pyfunction!(te_core::version, m)?)?;
-    m.add_function(wrap_pyfunction!(te_core::health, m)?)?;
-    m.add_function(wrap_pyfunction!(te_core::placeholder_fn, m)?)?;
-    m.add_function(wrap_pyfunction!(te_core::build_file_doc_id, m)?)?;
-    m.add_function(wrap_pyfunction!(te_core::get_doc_id_inputs, m)?)?;
-    m.add_function(wrap_pyfunction!(te_core::normalize_chunk_metadata, m)?)?;
+    m.add_function(wrap_pyfunction!(version, m)?)?;
+    m.add_function(wrap_pyfunction!(health, m)?)?;
+    m.add_function(wrap_pyfunction!(placeholder_fn, m)?)?;
+    m.add_function(wrap_pyfunction!(build_file_doc_id, m)?)?;
+    m.add_function(wrap_pyfunction!(get_doc_id_inputs, m)?)?;
+    m.add_function(wrap_pyfunction!(normalize_chunk_metadata, m)?)?;
 
     // Git blob parsing
     m.add_function(wrap_pyfunction!(parse_git_blob_line, m)?)?;
@@ -100,9 +104,9 @@ pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(extract_b_path, m)?)?;
 
     // Add Python classes
-    m.add_class::<PyTrackedFile>(m)?;
-    m.add_class::<PyDiffFile>(m)?;
-    m.add_class::<PyDiffParser>(m)?;
+    m.add_class::<PyTrackedFile>()?;
+    m.add_class::<PyDiffFile>()?;
+    m.add_class::<PyDiffParser>()?;
 
     m.add("__version__", te_core::get_version())?;
     Ok(())
@@ -111,6 +115,66 @@ pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 // =============================================================================
 // Git Blob Parsing Functions
 // =============================================================================
+
+/// Return te-core version string.
+#[pyfunction]
+fn version() -> &'static str {
+    te_core::get_version()
+}
+
+/// Return te-core health check string.
+#[pyfunction]
+fn health() -> String {
+    te_core::health_check()
+}
+
+/// Return placeholder integer.
+#[pyfunction]
+fn placeholder_fn() -> u32 {
+    te_core::placeholder()
+}
+
+/// Build deterministic doc ID for file content chunks.
+#[pyfunction]
+fn build_file_doc_id(path: &str, chunk_index: u32) -> String {
+    te_core::build_file_doc_id(path, chunk_index)
+}
+
+/// Return canonical and legacy ID input strings for a path.
+#[pyfunction]
+fn get_doc_id_inputs(path: &str, repo_root: &str) -> Vec<String> {
+    te_core::get_doc_id_inputs(path, Path::new(repo_root))
+}
+
+/// Normalize chunk metadata and return (metadata, chunk_index).
+#[pyfunction]
+fn normalize_chunk_metadata(
+    py: Python<'_>,
+    base_metadata: HashMap<String, PyObject>,
+    chunk_metadata: HashMap<String, PyObject>,
+    fallback_chunk_index: i64,
+) -> PyResult<(HashMap<String, PyObject>, i64)> {
+    let mut metadata = base_metadata;
+    metadata.extend(chunk_metadata);
+
+    let chunk_index = match metadata.get("chunk_index") {
+        Some(value) => {
+            let bound = value.bind(py);
+            if bound.is_instance_of::<PyBool>() {
+                fallback_chunk_index
+            } else {
+                match bound.extract::<i64>() {
+                    Ok(index) if index >= 0 => index,
+                    _ => fallback_chunk_index,
+                }
+            }
+        }
+        None => fallback_chunk_index,
+    };
+
+    metadata.insert("chunk_index".to_string(), chunk_index.into_py(py));
+    Ok((metadata, chunk_index))
+}
 
 /// Parse a single line from `git ls-files --stage` output.
 #[pyfunction]
