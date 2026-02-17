@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "town-elder-te-core"
+version = "0.1.0"
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+features = ["python"]
+module-name = "town_elder._te_core"

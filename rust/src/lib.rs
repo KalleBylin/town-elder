@@ -4,6 +4,7 @@
 //! The module is exposed as `town_elder._te_core`.
 
 use pyo3::prelude::*;
+use std::collections::HashMap;
 
 /// Initialize the PyO3 module with te-core functions.
 #[pymodule]
@@ -12,6 +13,9 @@ pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(te_core::version, m)?)?;
     m.add_function(wrap_pyfunction!(te_core::health, m)?)?;
     m.add_function(wrap_pyfunction!(te_core::placeholder_fn, m)?)?;
+    m.add_function(wrap_pyfunction!(te_core::build_file_doc_id, m)?)?;
+    m.add_function(wrap_pyfunction!(te_core::get_doc_id_inputs, m)?)?;
+    m.add_function(wrap_pyfunction!(te_core::normalize_chunk_metadata, m)?)?;
     m.add("__version__", te_core::get_version())?;
     Ok(())
 }

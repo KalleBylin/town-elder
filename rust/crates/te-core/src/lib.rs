@@ -6,6 +6,9 @@
 //! - A Python extension module via PyO3
 //! - A standalone CLI binary via clap
 
+use std::collections::HashMap;
+use std::path::Path;
+
 // =============================================================================
 // Minimal Compile-Only Functions (Scaffolding)
 // =============================================================================
@@ -29,12 +32,96 @@ pub fn placeholder() -> u32 {
 }
 
 // =============================================================================
+// Deterministic Doc-ID Generation
+// =============================================================================
+
+/// Build deterministic doc ID for file content chunks.
+///
+/// For chunk_index == 0, uses the path directly.
+/// For chunk_index > 0, appends "#chunk:{chunk_index}" to the path.
+///
+/// Returns the first 16 hex characters of SHA256 hash.
+pub fn build_file_doc_id(path: &str, chunk_index: u32) -> String {
+    use sha2::{Sha256, Digest};
+
+    let doc_id_input = if chunk_index == 0 {
+        path.to_string()
+    } else {
+        format!("{}#chunk:{}", path, chunk_index)
+    };
+
+    let mut hasher = Sha256::new();
+    hasher.update(doc_id_input.as_bytes());
+    let result = hasher.finalize();
+
+    // Return first 16 hex characters
+    format!("{:x}", result)[..16].to_string()
+}
+
+/// Return canonical and legacy ID input strings for a path.
+///
+/// This is used for deletion safety to ensure we can find docs
+/// regardless of whether they were indexed with relative or absolute paths.
+pub fn get_doc_id_inputs(path: &str, repo_root: &Path) -> Vec<String> {
+    let mut doc_id_inputs = vec![path.to_string()];
+
+    // If path is not absolute, also try the resolved absolute path
+    let path_obj = Path::new(path);
+    if !path_obj.is_absolute() {
+        let absolute_path = repo_root.join(path_obj);
+        if let Some(resolved) = absolute_path.to_str() {
+            doc_id_inputs.push(resolved.to_string());
+        }
+    }
+
+    doc_id_inputs
+}
+
+/// Normalize chunk metadata by merging base and chunk metadata,
+/// and validate/normalize the chunk_index field.
+///
+/// Returns a tuple of (normalized_metadata, chunk_index).
+pub fn normalize_chunk_metadata(
+    base_metadata: &HashMap<String, serde_json::Value>,
+    chunk_metadata: &HashMap<String, serde_json::Value>,
+    fallback_chunk_index: u32,
+) -> (HashMap<String, serde_json::Value>, u32) {
+    use serde_json::Value;
+
+    let mut metadata = base_metadata.clone();
+    metadata.extend(chunk_metadata.clone());
+
+    let chunk_index_value = metadata.get("chunk_index");
+
+    let chunk_index = match chunk_index_value {
+        Some(Value::Number(n)) => {
+            if let Some(idx) = n.as_u64() {
+                // idx is always >= 0 since it's u64
+                idx as u32
+            } else {
+                fallback_chunk_index
+            }
+        }
+        // Bool is treated as invalid (matches Python isinstance(..., bool) check)
+        Some(Value::Bool(_)) | None => fallback_chunk_index,
+        _ => fallback_chunk_index,
+    };
+
+    // Always ensure chunk_index is set in metadata
+    metadata.insert("chunk_index".to_string(), Value::Number(chunk_index.into()));
+
+    (metadata, chunk_index)
+}
+
+// =============================================================================
 // PyO3 Python Bindings
 // =============================================================================
 
 #[cfg(feature = "python")]
 mod pyo3_bindings {
     use super::*;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
 
     /// Returns the te-core version as a Python string.
     #[pyfunction]
@@ -54,12 +141,48 @@ mod pyo3_bindings {
         placeholder()
     }
 
+    /// Build deterministic doc ID for file content chunks.
+    ///
+    /// For chunk_index == 0, uses the path directly.
+    /// For chunk_index > 0, appends "#chunk:{chunk_index}" to the path.
+    ///
+    /// Returns the first 16 hex characters of SHA256 hash.
+    #[pyfunction]
+    pub fn build_file_doc_id(path: &str, chunk_index: u32) -> String {
+        super::build_file_doc_id(path, chunk_index)
+    }
+
+    /// Return canonical and legacy ID input strings for a path.
+    ///
+    /// This is used for deletion safety to ensure we can find docs
+    /// regardless of whether they were indexed with relative or absolute paths.
+    #[pyfunction]
+    pub fn get_doc_id_inputs(path: &str, repo_root: &str) -> Vec<String> {
+        super::get_doc_id_inputs(path, &PathBuf::from(repo_root))
+    }
+
+    /// Normalize chunk metadata by merging base and chunk metadata,
+    /// and validate/normalize the chunk_index field.
+    ///
+    /// Returns a tuple of (normalized_metadata, chunk_index).
+    #[pyfunction]
+    pub fn normalize_chunk_metadata(
+        base_metadata: HashMap<String, serde_json::Value>,
+        chunk_metadata: HashMap<String, serde_json::Value>,
+        fallback_chunk_index: u32,
+    ) -> (HashMap<String, serde_json::Value>, u32) {
+        super::normalize_chunk_metadata(&base_metadata, &chunk_metadata, fallback_chunk_index)
+    }
+
     /// Define the Python module "town_elder._te_core".
     pub fn create_module(py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::Bound<'_, pyo3::PyModule>> {
         let module = pyo3::Bound::new(py, "town_elder._te_core")?;
         module.add_function(pyo3::wrap_pyfunction!(version, &module)?)?;
         module.add_function(pyo3::wrap_pyfunction!(health, &module)?)?;
         module.add_function(pyo3::wrap_pyfunction!(placeholder_fn, &module)?)?;
+        module.add_function(pyo3::wrap_pyfunction!(build_file_doc_id, &module)?)?;
+        module.add_function(pyo3::wrap_pyfunction!(get_doc_id_inputs, &module)?)?;
+        module.add_function(pyo3::wrap_pyfunction!(normalize_chunk_metadata, &module)?)?;
         module.add("__version__", get_version())?;
         Ok(module)
     }
