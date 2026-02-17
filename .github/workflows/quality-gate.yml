@@ -14,13 +14,37 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-          cache-dependency-paths: pyproject.toml
+          cache-dependency-glob: "uv.lock"
 
       - name: Install dependencies
         run: uv sync --extra dev
 
       - name: Run Ruff
         run: uv run ruff check src tests
+
+  package-metadata:
+    name: Packaging Metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install project Python
+        run: uv python install "$(cat .python-version)"
+
+      - name: Verify lockfile is up-to-date for publishable metadata
+        run: uv lock --check --no-sources
+
+      - name: Build wheel and sdist
+        run: uv build --no-sources --sdist --wheel
+
+      - name: Validate distribution metadata
+        run: uvx twine check --strict dist/*
