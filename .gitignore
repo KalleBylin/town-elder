@@ -98,3 +98,6 @@ export-state/
 
 .town_elder/
 .proxima
+
+# Rust build artifacts
+rust/target/
