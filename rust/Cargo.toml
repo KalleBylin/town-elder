@@ -1,0 +1,16 @@
+[workspace]
+members = ["crates/te-core", "src"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Kalle Bylin"]
+license = "MIT"
+
+[workspace.dependencies]
+# Core crate dependencies
+te-core = { path = "crates/te-core" }
+
+# CLI dependencies
+clap = { version = "4.5", features = ["derive"] }

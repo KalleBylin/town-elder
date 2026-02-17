@@ -1,0 +1,15 @@
+[package]
+name = "te-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "te"
+path = "main.rs"
+
+[dependencies]
+te-core = { workspace = true }
+clap = { workspace = true }
+env_logger = "0.11"
