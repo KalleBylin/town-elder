@@ -9,7 +9,11 @@ license.workspace = true
 name = "te"
 path = "main.rs"
 
+[features]
+default = []
+python = ["te-core/python"]
+
 [dependencies]
-te-core = { workspace = true }
+te-core = { workspace = true, features = ["python"] }
 clap = { workspace = true }
 env_logger = "0.11"

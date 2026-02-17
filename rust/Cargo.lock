@@ -512,18 +512,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "te-py"
-version = "0.1.0"
-dependencies = [
- "pyo3",
- "pyo3-build-config",
- "serde",
- "serde_json",
- "sha2",
- "te-core",
-]
-
-[[package]]
 name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
