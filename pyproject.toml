@@ -1,6 +1,6 @@
 [project]
 name = "town-elder"
-version = "0.2.0"
+version = "0.2.1"
 description = "A semantic git CLI tool using zvec + fastembed"
 readme = "README.md"
 license = "MIT"

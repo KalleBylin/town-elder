@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/KalleBylin/town-elder/compare/v0.2.0...v0.2.1) (2026-02-17)
+
+
+### Bug Fixes
+
+* **packaging:** add README metadata and require pillow&gt;=12.1.1 ([fc358d1](https://github.com/KalleBylin/town-elder/commit/fc358d12ef68c0b59e92710dbb77fa43db37aeb2))
+* **packaging:** add README metadata and require pillow&gt;=12.1.1 ([966b5cd](https://github.com/KalleBylin/town-elder/commit/966b5cdaffca4b4cf65fd3f6dc087e85b83a0eca))
+
 ## 0.2.0 (2026-02-17)
 
 
