@@ -798,6 +798,415 @@ pub fn placeholder() -> u32 {
 }
 
 // =============================================================================
+// Minimal Backend Abstractions for Embedding and Vector Storage
+// =============================================================================
+
+use std::sync::Arc;
+
+/// Error type for backend operations.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BackendError {
+    /// Embedding generation failed
+    EmbeddingError(String),
+    /// Vector storage operation failed
+    StorageError(String),
+    /// Search operation failed
+    SearchError(String),
+    /// Configuration error
+    ConfigError(String),
+    /// Document not found
+    NotFound(String),
+    /// Invalid input
+    InvalidInput(String),
+}
+
+impl std::fmt::Display for BackendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BackendError::EmbeddingError(msg) => write!(f, "Embedding error: {}", msg),
+            BackendError::StorageError(msg) => write!(f, "Storage error: {}", msg),
+            BackendError::SearchError(msg) => write!(f, "Search error: {}", msg),
+            BackendError::ConfigError(msg) => write!(f, "Config error: {}", msg),
+            BackendError::NotFound(msg) => write!(f, "Not found: {}", msg),
+            BackendError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for BackendError {}
+
+/// A vector embedding with optional metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Embedding {
+    /// The vector values
+    pub values: Vec<f32>,
+    /// Optional metadata associated with this embedding
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+impl Embedding {
+    /// Create a new embedding with values and optional metadata.
+    pub fn new(values: Vec<f32>, metadata: Option<HashMap<String, serde_json::Value>>) -> Self {
+        Self {
+            values,
+            metadata: metadata.unwrap_or_default(),
+        }
+    }
+
+    /// Get the dimensionality of this embedding.
+    pub fn dimensions(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Compute cosine similarity with another embedding.
+    pub fn cosine_similarity(&self, other: &Embedding) -> f32 {
+        if self.values.is_empty() || other.values.is_empty() {
+            return 0.0;
+        }
+
+        let dot_product: f32 = self
+            .values
+            .iter()
+            .zip(other.values.iter())
+            .map(|(a, b)| a * b)
+            .sum();
+
+        let norm_a: f32 = self.values.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = other.values.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+        if norm_a == 0.0 || norm_b == 0.0 {
+            return 0.0;
+        }
+
+        dot_product / (norm_a * norm_b)
+    }
+}
+
+/// A document with content, ID, and metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Document {
+    /// Unique document identifier
+    pub id: String,
+    /// Document content (text)
+    pub content: String,
+    /// Document metadata
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+impl Document {
+    /// Create a new document.
+    pub fn new(id: String, content: String, metadata: Option<HashMap<String, serde_json::Value>>) -> Self {
+        Self {
+            id,
+            content,
+            metadata: metadata.unwrap_or_default(),
+        }
+    }
+}
+
+/// A search result with document and score.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchResult {
+    /// The matched document
+    pub document: Document,
+    /// Similarity score (higher is better)
+    pub score: f32,
+}
+
+/// Configuration for backend initialization.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackendConfig {
+    /// Embedding dimensions
+    pub embedding_dimensions: usize,
+    /// Optional backend-specific configuration
+    pub backend_type: BackendType,
+}
+
+impl Default for BackendConfig {
+    fn default() -> Self {
+        Self {
+            embedding_dimensions: 384,
+            backend_type: BackendType::InMemory,
+        }
+    }
+}
+
+/// Type of backend to use.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BackendType {
+    /// In-memory backend for testing/local development
+    InMemory,
+    /// Python interop (placeholder for future)
+    Python,
+    /// Remote backend (placeholder for future)
+    Remote(String),
+}
+
+/// Trait for text embedding generation.
+pub trait Embedder: Send + Sync {
+    /// Generate embeddings for the given texts.
+    fn embed(&self, texts: &[String]) -> Result<Vec<Embedding>, BackendError>;
+
+    /// Get the dimensionality of embeddings produced by this embedder.
+    fn dimensions(&self) -> usize;
+}
+
+/// Trait for vector storage and retrieval.
+pub trait VectorStore: Send + Sync {
+    /// Add documents to the store.
+    fn add(&self, documents: Vec<Document>, embeddings: Vec<Embedding>) -> Result<(), BackendError>;
+
+    /// Search for similar documents.
+    fn search(&self, query_embedding: &Embedding, top_k: usize) -> Result<Vec<SearchResult>, BackendError>;
+
+    /// Delete a document by ID.
+    fn delete(&self, doc_id: &str) -> Result<(), BackendError>;
+
+    /// Get a document by ID.
+    fn get(&self, doc_id: &str) -> Result<Document, BackendError>;
+
+    /// Get the number of documents in the store.
+    fn count(&self) -> usize;
+
+    /// Filter documents by metadata.
+    fn filter(&self, filter: &HashMap<String, serde_json::Value>) -> Result<Vec<Document>, BackendError>;
+}
+
+/// Combined embedder and vector store interface.
+pub trait EmbeddingBackend: Send + Sync {
+    /// Generate embeddings and add documents to the store in one step.
+    fn embed_and_store(&self, documents: Vec<Document>) -> Result<(), BackendError>;
+
+    /// Search the store with a text query.
+    fn search_text(&self, query: &str, top_k: usize) -> Result<Vec<SearchResult>, BackendError>;
+
+    /// Get the embedder component.
+    fn embedder(&self) -> Arc<dyn Embedder>;
+
+    /// Get the vector store component.
+    fn vector_store(&self) -> Arc<dyn VectorStore>;
+}
+
+// =============================================================================
+// In-Memory Implementations
+// =============================================================================
+
+use std::sync::RwLock;
+
+/// In-memory embedder implementation (random embeddings for testing).
+pub struct InMemoryEmbedder {
+    dimensions: usize,
+}
+
+impl InMemoryEmbedder {
+    /// Create a new in-memory embedder with specified dimensions.
+    pub fn new(dimensions: usize) -> Self {
+        Self { dimensions }
+    }
+}
+
+impl Embedder for InMemoryEmbedder {
+    fn embed(&self, texts: &[String]) -> Result<Vec<Embedding>, BackendError> {
+        if texts.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Use a deterministic seed based on text content for reproducibility
+        let mut embeddings = Vec::with_capacity(texts.len());
+        for (idx, text) in texts.iter().enumerate() {
+            let mut values = Vec::with_capacity(self.dimensions);
+            // Generate pseudo-random but deterministic values based on text
+            let seed = text.len() * 1000 + idx;
+            for i in 0..self.dimensions {
+                let val = ((seed + i * 31) as f32).sin() / (i as f32 + 1.0).abs();
+                values.push(val);
+            }
+
+            // Normalize to unit vector
+            let norm: f32 = values.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm > 0.0 {
+                values = values.iter().map(|x| x / norm).collect();
+            }
+
+            embeddings.push(Embedding::new(values, None));
+        }
+
+        Ok(embeddings)
+    }
+
+    fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+}
+
+/// In-memory vector store implementation.
+pub struct InMemoryVectorStore {
+    documents: RwLock<HashMap<String, Document>>,
+    embeddings: RwLock<HashMap<String, Embedding>>,
+}
+
+impl InMemoryVectorStore {
+    /// Create a new in-memory vector store.
+    pub fn new() -> Self {
+        Self {
+            documents: RwLock::new(HashMap::new()),
+            embeddings: RwLock::new(HashMap::new()),
+        }
+    }
+}
+
+impl Default for InMemoryVectorStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VectorStore for InMemoryVectorStore {
+    fn add(&self, documents: Vec<Document>, embeddings: Vec<Embedding>) -> Result<(), BackendError> {
+        if documents.len() != embeddings.len() {
+            return Err(BackendError::InvalidInput(
+                "Number of documents must match number of embeddings".to_string(),
+            ));
+        }
+
+        let mut docs = self.documents.write().map_err(|_| {
+            BackendError::StorageError("Failed to acquire write lock".to_string())
+        })?;
+        let mut embeds = self.embeddings.write().map_err(|_| {
+            BackendError::StorageError("Failed to acquire write lock".to_string())
+        })?;
+
+        for (doc, emb) in documents.into_iter().zip(embeddings.into_iter()) {
+            let doc_id = doc.id.clone();
+            docs.insert(doc_id.clone(), doc);
+            embeds.insert(doc_id, emb);
+        }
+
+        Ok(())
+    }
+
+    fn search(&self, query_embedding: &Embedding, top_k: usize) -> Result<Vec<SearchResult>, BackendError> {
+        let docs = self.documents.read().map_err(|_| {
+            BackendError::SearchError("Failed to acquire read lock".to_string())
+        })?;
+        let embeds = self.embeddings.read().map_err(|_| {
+            BackendError::SearchError("Failed to acquire read lock".to_string())
+        })?;
+
+        let mut results: Vec<SearchResult> = docs
+            .iter()
+            .filter_map(|(id, doc)| {
+                embeds.get(id).map(|emb| {
+                    let score = query_embedding.cosine_similarity(emb);
+                    SearchResult {
+                        document: doc.clone(),
+                        score,
+                    }
+                })
+            })
+            .collect();
+
+        // Sort by score descending
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Return top k
+        results.truncate(top_k);
+        Ok(results)
+    }
+
+    fn delete(&self, doc_id: &str) -> Result<(), BackendError> {
+        let mut docs = self.documents.write().map_err(|_| {
+            BackendError::StorageError("Failed to acquire write lock".to_string())
+        })?;
+        let mut embeds = self.embeddings.write().map_err(|_| {
+            BackendError::StorageError("Failed to acquire write lock".to_string())
+        })?;
+
+        docs.remove(doc_id);
+        embeds.remove(doc_id);
+
+        Ok(())
+    }
+
+    fn get(&self, doc_id: &str) -> Result<Document, BackendError> {
+        let docs = self.documents.read().map_err(|_| {
+            BackendError::StorageError("Failed to acquire read lock".to_string())
+        })?;
+
+        docs.get(doc_id)
+            .cloned()
+            .ok_or_else(|| BackendError::NotFound(format!("Document {} not found", doc_id)))
+    }
+
+    fn count(&self) -> usize {
+        self.documents.read()
+            .map(|docs| docs.len())
+            .unwrap_or(0)
+    }
+
+    fn filter(&self, filter: &HashMap<String, serde_json::Value>) -> Result<Vec<Document>, BackendError> {
+        let docs = self.documents.read().map_err(|_| {
+            BackendError::StorageError("Failed to acquire read lock".to_string())
+        })?;
+
+        let results: Vec<Document> = docs
+            .values()
+            .filter(|doc| {
+                filter.iter().all(|(key, value)| {
+                    doc.metadata.get(key) == Some(value)
+                })
+            })
+            .cloned()
+            .collect();
+
+        Ok(results)
+    }
+}
+
+/// Combined in-memory backend for embedder + vector store.
+pub struct InMemoryBackend {
+    embedder: Arc<InMemoryEmbedder>,
+    store: Arc<InMemoryVectorStore>,
+}
+
+impl InMemoryBackend {
+    /// Create a new in-memory backend.
+    pub fn new(dimensions: usize) -> Self {
+        Self {
+            embedder: Arc::new(InMemoryEmbedder::new(dimensions)),
+            store: Arc::new(InMemoryVectorStore::new()),
+        }
+    }
+
+    /// Create from config.
+    pub fn from_config(config: &BackendConfig) -> Self {
+        Self::new(config.embedding_dimensions)
+    }
+}
+
+impl EmbeddingBackend for InMemoryBackend {
+    fn embed_and_store(&self, documents: Vec<Document>) -> Result<(), BackendError> {
+        let texts: Vec<String> = documents.iter().map(|d| d.content.clone()).collect();
+        let embeddings = self.embedder.embed(&texts)?;
+        self.store.add(documents, embeddings)
+    }
+
+    fn search_text(&self, query: &str, top_k: usize) -> Result<Vec<SearchResult>, BackendError> {
+        let embeddings = self.embedder.embed(&[query.to_string()])?;
+        let query_embedding = &embeddings[0];
+        self.store.search(query_embedding, top_k)
+    }
+
+    fn embedder(&self) -> Arc<dyn Embedder> {
+        self.embedder.clone()
+    }
+
+    fn vector_store(&self) -> Arc<dyn VectorStore> {
+        self.store.clone()
+    }
+}
+
+// =============================================================================
 // Deterministic Doc-ID Generation
 // =============================================================================
 
@@ -1410,4 +1819,5 @@ def456\x1fSecond commit\x1fAuthor\x1f2024-01-02T00:00:00+00:00\x1e\n\
         let result = append_truncation_note(text, diff);
         assert!(result.contains("[diff was truncated due to size]"));
     }
+
 }
