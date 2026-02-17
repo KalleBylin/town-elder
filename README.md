@@ -248,7 +248,8 @@ Town Elder stores data in a `.town_elder` directory in your project:
 your-project/
 ├── .town_elder/
 │   ├── vectors/         # Vector database files
-│   └── index_state.json # Index state for incremental updates
+│   ├── index_state.json # Commit indexing state
+│   └── file_index_state.json # File hash/chunk state for incremental file indexing
 └── .git/
 ```
 
@@ -259,6 +260,50 @@ your-project/
 - **Indexed file types**: `.py`, `.md`, and `.rst` files
 
 Configuration is managed via environment variables or `pyproject.toml`. See `town_elder.config` for available options.
+
+## File Indexing Notes
+
+### `.rst` Semantic Metadata
+
+When indexing `.rst` files (`uv run te index --all` or `uv run te index files`), Town Elder stores section-aware chunk metadata:
+
+- `section_path` and `section_depth` for heading hierarchy
+- `directives` and `has_directives` for directive extraction (for example `.. note::`)
+- `temporal_tags` and `has_temporal_tags` for temporal directives (for example `.. deprecated::`, `.. versionchanged::`)
+
+### First Run vs Rerun
+
+- **First run** (`uv run te index --all`): scans all supported files and writes `file_index_state.json`.
+- **Incremental rerun** (`uv run te index --all` again): compares tracked git blob hashes and skips unchanged files automatically.
+- Use `uv run te index files . --no-incremental` if you need a forced full reindex.
+
+### 60k-File Benchmark (2026-02-17)
+
+Benchmark command:
+
+```bash
+PYTHONPATH=src python scripts/benchmark_indexing.py \
+  --files 60000 \
+  --workers 8 \
+  --output-json docs/benchmarks/indexing-60k-2026-02-17.json \
+  --output-md docs/benchmarks/indexing-60k-2026-02-17.md
+```
+
+Measured results from `docs/benchmarks/indexing-60k-2026-02-17.json`:
+
+| Profile | Parser mode | Scan files/s | Parse files/s | Embed chunks/s | Total wall s |
+|---|---|---:|---:|---:|---:|
+| baseline_full | sequential | 36,502.6 | 21,248.2 | 126,454.1 | 5.04 |
+| optimized_full | sequential_fallback | 39,189.8 | 20,613.8 | 2,088,038.4 | 4.48 |
+| optimized_rerun_hash_skip | n/a | 158,919.2 | 0.0 | 0.0 | 1.47 |
+
+Notes:
+
+- `optimized_full` used `sequential_fallback` parser mode in this restricted environment (process pools unavailable), so parse speedup is conservative.
+- Embed throughput improved ~16.5x and total wall time improved ~1.13x.
+- Incremental rerun (`optimized_rerun_hash_skip`) skipped all unchanged files.
+
+For full workflow details see `docs/indexing.md`.
 
 ## Troubleshooting
 

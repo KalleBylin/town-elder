@@ -8,6 +8,7 @@ import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from typer.testing import CliRunner
 
@@ -17,6 +18,7 @@ from town_elder.indexing.pipeline import parse_work_item
 runner = CliRunner()
 
 _SHA1_HEX_LENGTH = 40
+_MIN_EXPECTED_RST_CHUNKS = 2
 
 
 class _FakeEmbedder:
@@ -37,7 +39,7 @@ class _FakeEmbedder:
 class _RecordingStore:
     def __init__(self, enforce_json_metadata: bool = False):
         self.enforce_json_metadata = enforce_json_metadata
-        self.upserts: list[tuple[str, dict[str, str]]] = []
+        self.upserts: list[tuple[str, dict[str, Any]]] = []
         self.deletes: list[str] = []
         self.bulk_upsert_calls = 0
 
@@ -46,7 +48,7 @@ class _RecordingStore:
         doc_id: str,
         vector: list[float],
         text: str,
-        metadata: dict[str, str],
+        metadata: dict[str, Any],
     ) -> None:
         _ = vector, text
         if self.enforce_json_metadata:
@@ -55,7 +57,7 @@ class _RecordingStore:
 
     def bulk_upsert(
         self,
-        docs: list[tuple[str, list[float], str, dict[str, str]]],
+        docs: list[tuple[str, list[float], str, dict[str, Any]]],
     ) -> None:
         self.bulk_upsert_calls += 1
         for doc_id, vector, text, metadata in docs:
@@ -107,7 +109,7 @@ def _patch_cli_services(
     return fake_embedder
 
 
-def _init_git_repo_with_file(tmp_path: Path, file_name: str = "main.py") -> Path:
+def _init_git_repo_with_files(tmp_path: Path, files: dict[str, str]) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -125,7 +127,10 @@ def _init_git_repo_with_file(tmp_path: Path, file_name: str = "main.py") -> Path
         capture_output=True,
     )
 
-    (repo / file_name).write_text("print('hello')\n")
+    for rel_path, content in files.items():
+        target = repo / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
     subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
     subprocess.run(
         ["git", "commit", "-m", "initial commit"],
@@ -135,6 +140,10 @@ def _init_git_repo_with_file(tmp_path: Path, file_name: str = "main.py") -> Path
     )
 
     return repo
+
+
+def _init_git_repo_with_file(tmp_path: Path, file_name: str = "main.py") -> Path:
+    return _init_git_repo_with_files(tmp_path, {file_name: "print('hello')\n"})
 
 
 def test_index_files_incremental_uses_string_blob_hash_metadata(monkeypatch, tmp_path):
@@ -188,6 +197,10 @@ def test_index_files_incremental_unchanged_run_does_not_delete(monkeypatch, tmp_
     assert first.exit_code == 0, first.output
     assert len(store.upserts) == 1
     assert store.deletes == []
+    state_file = cli._get_file_state_path(data_dir)
+    saved_state = json.loads(state_file.read_text())
+    repo_id = cli._get_repo_id(project)
+    assert saved_state[repo_id]["file_hashes"] == file_hashes
 
     second = runner.invoke(
         cli.app,
@@ -197,6 +210,66 @@ def test_index_files_incremental_unchanged_run_does_not_delete(monkeypatch, tmp_
     assert "skipped 1 unchanged" in second.output
     assert len(store.upserts) == 1
     assert store.deletes == []
+    saved_state_after_rerun = json.loads(state_file.read_text())
+    assert saved_state_after_rerun[repo_id]["file_hashes"] == file_hashes
+
+
+def test_index_files_rst_metadata_includes_sections_directives_and_temporal_tags(
+    monkeypatch, tmp_path
+):
+    """RST chunks should preserve semantic metadata through the CLI indexing flow."""
+    repo = _init_git_repo_with_files(
+        tmp_path,
+        {
+            "docs/guide.rst": (
+                "Guide\n"
+                "=====\n"
+                "\n"
+                ".. note::\n"
+                "   Keep this in mind.\n"
+                "\n"
+                ".. deprecated:: 1.2\n"
+                "   Old API.\n"
+                "\n"
+                "Subsection\n"
+                "----------\n"
+                "\n"
+                ".. versionchanged:: 2.0\n"
+                "   Updated behavior.\n"
+            )
+        },
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    store = _RecordingStore(enforce_json_metadata=True)
+    _patch_cli_services(monkeypatch, data_dir, store)
+
+    result = runner.invoke(
+        cli.app,
+        ["--data-dir", str(data_dir), "index", "files", str(repo)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(store.upserts) >= _MIN_EXPECTED_RST_CHUNKS
+
+    metadata_rows = [metadata for _, metadata in store.upserts]
+    assert all(metadata["type"] == ".rst" for metadata in metadata_rows)
+    assert any(metadata.get("section_path") == ["Guide"] for metadata in metadata_rows)
+    assert any(
+        metadata.get("section_path") == ["Guide", "Subsection"]
+        for metadata in metadata_rows
+    )
+    assert any(metadata.get("has_directives") is True for metadata in metadata_rows)
+    assert any("note" in metadata.get("directives", {}) for metadata in metadata_rows)
+
+    temporal_tags = {
+        tag
+        for metadata in metadata_rows
+        for tag in metadata.get("temporal_tags", [])
+    }
+    assert "deprecated" in temporal_tags
+    assert "versionchanged" in temporal_tags
 
 
 def test_index_files_incremental_deletion_uses_absolute_doc_id_and_clears_state(
