@@ -290,3 +290,26 @@ def test_index_files_uses_batch_embed_and_bulk_upsert(monkeypatch, tmp_path):
     assert embedder.embed_calls == 1
     assert embedder.embed_single_calls == 0
     assert store.bulk_upsert_calls == 1
+
+
+def test_index_files_emits_stage_status_lines_non_interactive(monkeypatch, tmp_path):
+    """Non-TTY runs should emit readable stage status and final summary."""
+    repo = _init_git_repo_with_file(tmp_path)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    store = _RecordingStore()
+    _patch_cli_services(monkeypatch, data_dir, store)
+
+    result = runner.invoke(
+        cli.app,
+        ["--data-dir", str(data_dir), "index", "files", str(repo)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Scanning: 0/?" in result.output
+    assert "Scanning: 1/1" in result.output
+    assert "Parsing: 1/1" in result.output
+    assert "Embedding: 1/1" in result.output
+    assert "Storing: 1/1" in result.output
+    assert "Indexed 1 files" in result.output

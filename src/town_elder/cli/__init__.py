@@ -7,6 +7,7 @@ import hashlib
 import json
 import shlex
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -614,6 +615,144 @@ class _FileIndexBatchState:
     errors: list[str] = field(default_factory=list)
 
 
+_FILE_INDEX_STAGE_SCANNING = "scanning"
+_FILE_INDEX_STAGE_PARSING = "parsing"
+_FILE_INDEX_STAGE_EMBEDDING = "embedding"
+_FILE_INDEX_STAGE_STORING = "storing"
+
+
+class _FileIndexProgressReporter:
+    """Render file-index stage progress for TTY and non-TTY environments."""
+
+    _NON_INTERACTIVE_STEP_TARGET = 10
+    _STAGE_LABELS = {
+        _FILE_INDEX_STAGE_SCANNING: "Scanning",
+        _FILE_INDEX_STAGE_PARSING: "Parsing",
+        _FILE_INDEX_STAGE_EMBEDDING: "Embedding",
+        _FILE_INDEX_STAGE_STORING: "Storing",
+    }
+
+    def __init__(self, *, output_console: Any) -> None:
+        self._console = output_console
+        self._interactive = (
+            output_console.is_terminal
+            and not output_console.is_dumb_terminal
+            and output_console.is_interactive
+        )
+        self._progress: Progress | None = None
+        self._task_ids: dict[str, int] = {}
+        self._totals: dict[str, int | None] = dict.fromkeys(self._STAGE_LABELS, None)
+        self._completed: dict[str, int] = dict.fromkeys(self._STAGE_LABELS, 0)
+        self._last_emitted: dict[str, str | None] = dict.fromkeys(
+            self._STAGE_LABELS,
+            None,
+        )
+
+    def __enter__(self) -> _FileIndexProgressReporter:
+        if self._interactive:
+            self._progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                console=self._console,
+            )
+            self._progress.start()
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._progress is not None:
+            self._progress.stop()
+
+    def begin_stage(self, stage: str, *, total: int | None) -> None:
+        self._totals[stage] = total
+        self._completed[stage] = 0
+        self._sync(stage, force_emit=True)
+
+    def set_total(self, stage: str, *, total: int | None) -> None:
+        self._totals[stage] = total
+        completed = self._completed[stage]
+        if total is not None and completed > total:
+            self._completed[stage] = total
+        self._sync(stage, force_emit=True)
+
+    def advance(self, stage: str, amount: int = 1) -> None:
+        if amount <= 0:
+            return
+
+        self._completed[stage] += amount
+        total = self._totals[stage]
+        if total is not None and self._completed[stage] > total:
+            self._completed[stage] = total
+        self._sync(stage)
+
+    def complete(self, stage: str) -> None:
+        total = self._totals[stage]
+        if total is not None:
+            self._completed[stage] = total
+        self._sync(stage, force_emit=True)
+
+    def _sync(self, stage: str, *, force_emit: bool = False) -> None:
+        if self._interactive and self._progress is not None:
+            self._sync_interactive(stage)
+            return
+
+        self._sync_non_interactive(stage, force_emit=force_emit)
+
+    def _sync_interactive(self, stage: str) -> None:
+        if self._progress is None:
+            return
+
+        task_id = self._task_ids.get(stage)
+        if task_id is None:
+            task_id = self._progress.add_task(
+                self._status_line(stage),
+                total=self._totals[stage],
+            )
+            self._task_ids[stage] = task_id
+        else:
+            self._progress.update(
+                task_id,
+                completed=self._completed[stage],
+                total=self._totals[stage],
+                description=self._status_line(stage),
+            )
+
+    def _sync_non_interactive(self, stage: str, *, force_emit: bool) -> None:
+        status = self._status_line(stage)
+        if not force_emit and not self._should_emit_non_interactive(stage):
+            return
+        if status == self._last_emitted[stage]:
+            return
+
+        self._console.print(status)
+        self._last_emitted[stage] = status
+
+    def _should_emit_non_interactive(self, stage: str) -> bool:
+        total = self._totals[stage]
+        completed = self._completed[stage]
+
+        if total is None:
+            return False
+
+        if completed in {0, total}:
+            return True
+
+        if total <= 0:
+            return False
+
+        step = max(total // self._NON_INTERACTIVE_STEP_TARGET, 1)
+        return completed % step == 0
+
+    def _status_line(self, stage: str) -> str:
+        label = self._STAGE_LABELS[stage]
+        completed = self._completed[stage]
+        total = self._totals[stage]
+        total_text = "?" if total is None else str(total)
+        return f"{label}: {completed}/{total_text}"
+
+
 def _normalize_chunk_metadata(
     *,
     base_metadata: dict[str, Any],
@@ -677,6 +816,7 @@ def _fallback_index_chunks_individually(
     embedder: Any,
     store: Any,
     batch_error: Exception,
+    on_stage_progress: Callable[[str, int], None] | None = None,
 ) -> list[ChunkBatchResult]:
     """Fallback path that isolates per-chunk failures after batch failure."""
 
@@ -684,6 +824,20 @@ def _fallback_index_chunks_individually(
     for item in batch:
         try:
             vector = embedder.embed_single(item.text)
+        except Exception as exc:
+            if on_stage_progress is not None:
+                on_stage_progress(_FILE_INDEX_STAGE_EMBEDDING, 1)
+                on_stage_progress(_FILE_INDEX_STAGE_STORING, 1)
+            error = (
+                f"chunk {item.chunk_index} failed after batch fallback: {exc} "
+                f"(batch error: {batch_error})"
+            )
+            results.append(ChunkBatchResult(item=item, error=error))
+            continue
+
+        if on_stage_progress is not None:
+            on_stage_progress(_FILE_INDEX_STAGE_EMBEDDING, 1)
+        try:
             _upsert_single_chunk(
                 store,
                 doc_id=item.doc_id,
@@ -698,6 +852,9 @@ def _fallback_index_chunks_individually(
                 f"(batch error: {batch_error})"
             )
             results.append(ChunkBatchResult(item=item, error=error))
+        finally:
+            if on_stage_progress is not None:
+                on_stage_progress(_FILE_INDEX_STAGE_STORING, 1)
     return results
 
 
@@ -707,6 +864,7 @@ def _fallback_store_chunks_individually(
     *,
     store: Any,
     batch_error: Exception,
+    on_stage_progress: Callable[[str, int], None] | None = None,
 ) -> list[ChunkBatchResult]:
     """Fallback path for bulk storage failures."""
 
@@ -727,6 +885,9 @@ def _fallback_store_chunks_individually(
                 f"(batch error: {batch_error})"
             )
             results.append(ChunkBatchResult(item=item, error=error))
+        finally:
+            if on_stage_progress is not None:
+                on_stage_progress(_FILE_INDEX_STAGE_STORING, 1)
     return results
 
 
@@ -735,6 +896,7 @@ def _flush_file_chunk_batch(
     *,
     embedder: Any,
     store: Any,
+    on_stage_progress: Callable[[str, int], None] | None = None,
 ) -> list[ChunkBatchResult]:
     texts = [item.text for item in batch]
     try:
@@ -748,6 +910,7 @@ def _flush_file_chunk_batch(
             embedder=embedder,
             store=store,
             batch_error=exc,
+            on_stage_progress=on_stage_progress,
         )
 
     if len(embeddings) != len(batch):
@@ -759,7 +922,10 @@ def _flush_file_chunk_batch(
             embedder=embedder,
             store=store,
             batch_error=length_error,
+            on_stage_progress=on_stage_progress,
         )
+    if on_stage_progress is not None:
+        on_stage_progress(_FILE_INDEX_STAGE_EMBEDDING, len(batch))
 
     bulk_docs = [
         (item.doc_id, vector, item.text, item.metadata)
@@ -767,6 +933,8 @@ def _flush_file_chunk_batch(
     ]
     try:
         _bulk_upsert_chunks(store, bulk_docs)
+        if on_stage_progress is not None:
+            on_stage_progress(_FILE_INDEX_STAGE_STORING, len(batch))
         return [ChunkBatchResult(item=item) for item in batch]
     except Exception as exc:
         error_console.print(
@@ -777,6 +945,7 @@ def _flush_file_chunk_batch(
             embeddings,
             store=store,
             batch_error=exc,
+            on_stage_progress=on_stage_progress,
         )
 
 
@@ -1301,217 +1470,255 @@ def index_files(  # noqa: PLR0912
             }
         file_chunks = _extract_file_chunks(repo_state)
 
-    with get_cli_services(ctx) as (svc, embedder, store):
-        # Build exclusion patterns (additive to defaults)
-        user_excludes = frozenset(exclude) if exclude else None
+    with (
+        get_cli_services(ctx) as (svc, embedder, store),
+        _FileIndexProgressReporter(output_console=console) as progress_reporter,
+    ):
+            progress_reporter.begin_stage(_FILE_INDEX_STAGE_SCANNING, total=None)
 
-        # Use the scanner module for file discovery
-        # This includes .py, .md, .rst by default and excludes _build, .git, etc.
-        files_to_index = scan_files(index_path, exclude_patterns=user_excludes)
+            # Build exclusion patterns (additive to defaults)
+            user_excludes = frozenset(exclude) if exclude else None
 
-        # Determine which files need indexing
-        files_to_process: list[tuple[Path, str, str | None]] = []
-        current_tracked_paths: set[str] = set()
-        next_file_hashes: dict[str, str] = {}
-        next_file_chunks: dict[str, int] = {}
-        for file in files_to_index:
-            # Get relative path from repo root
-            try:
-                rel_path = file.relative_to(repo_root)
-            except ValueError:
-                # File is outside repo root, use absolute path as string
-                rel_path = file
-
-            rel_path_str = str(rel_path)
-
-            if incremental:
-                # Check if file is tracked in git
-                blob_hash = _extract_blob_hash(current_blobs.get(rel_path_str))
-                if blob_hash is None:
-                    # File not in git (might be untracked or in exclusion)
-                    # Skip it for incremental mode
-                    continue
-
-                current_tracked_paths.add(rel_path_str)
-
-                # Check if hash changed
-                old_hash = file_state.get(rel_path_str)
-                if old_hash == blob_hash:
-                    # File unchanged, skip
-                    next_file_hashes[rel_path_str] = blob_hash
-                    next_file_chunks[rel_path_str] = file_chunks.get(rel_path_str, 1)
-                    continue
-            else:
-                blob_hash = None
-
-            files_to_process.append((file, rel_path_str, blob_hash))
-
-        console.print(
-            f"[green]Indexing {len(files_to_process)} files"
-            + (f" (skipped {len(files_to_index) - len(files_to_process)} unchanged)" if incremental else "")
-            + "...[/green]"
-        )
-
-        indexed_count = 0
-        skipped_count = 0
-
-        try:
-            work_items = build_file_work_items(files_to_process)
-            parsed_results = parse_files_pipeline(work_items)
-            file_states: dict[str, _FileIndexBatchState] = {}
-            ordered_file_states: list[str] = []
-            batch_manager = BatchManager(
-                flush_fn=lambda batch: _flush_file_chunk_batch(
-                    batch,
-                    embedder=embedder,
-                    store=store,
-                ),
+            # Use the scanner module for file discovery
+            # This includes .py, .md, .rst by default and excludes _build, .git, etc.
+            files_to_index = scan_files(index_path, exclude_patterns=user_excludes)
+            progress_reporter.set_total(
+                _FILE_INDEX_STAGE_SCANNING,
+                total=len(files_to_index),
             )
 
-            for parsed_result in parsed_results:
-                file = Path(parsed_result.work_item.path)
-                rel_path_str = parsed_result.work_item.relative_path
-                blob_hash = parsed_result.work_item.blob_hash
-                previous_hash = file_state.get(rel_path_str)
-                previous_chunk_count = file_chunks.get(rel_path_str, 1)
-                file_state_entry = _FileIndexBatchState(
-                    file_path=file,
-                    relative_path=rel_path_str,
-                    blob_hash=blob_hash,
-                    previous_hash=previous_hash,
-                    previous_chunk_count=previous_chunk_count,
+            # Determine which files need indexing
+            files_to_process: list[tuple[Path, str, str | None]] = []
+            current_tracked_paths: set[str] = set()
+            next_file_hashes: dict[str, str] = {}
+            next_file_chunks: dict[str, int] = {}
+            for file in files_to_index:
+                progress_reporter.advance(_FILE_INDEX_STAGE_SCANNING)
+
+                # Get relative path from repo root
+                try:
+                    rel_path = file.relative_to(repo_root)
+                except ValueError:
+                    # File is outside repo root, use absolute path as string
+                    rel_path = file
+
+                rel_path_str = str(rel_path)
+
+                if incremental:
+                    # Check if file is tracked in git
+                    blob_hash = _extract_blob_hash(current_blobs.get(rel_path_str))
+                    if blob_hash is None:
+                        # File not in git (might be untracked or in exclusion)
+                        # Skip it for incremental mode
+                        continue
+
+                    current_tracked_paths.add(rel_path_str)
+
+                    # Check if hash changed
+                    old_hash = file_state.get(rel_path_str)
+                    if old_hash == blob_hash:
+                        # File unchanged, skip
+                        next_file_hashes[rel_path_str] = blob_hash
+                        next_file_chunks[rel_path_str] = file_chunks.get(rel_path_str, 1)
+                        continue
+                else:
+                    blob_hash = None
+
+                files_to_process.append((file, rel_path_str, blob_hash))
+
+            progress_reporter.complete(_FILE_INDEX_STAGE_SCANNING)
+
+            console.print(
+                f"[green]Indexing {len(files_to_process)} files"
+                + (f" (skipped {len(files_to_index) - len(files_to_process)} unchanged)" if incremental else "")
+                + "...[/green]"
+            )
+
+            indexed_count = 0
+            skipped_count = 0
+
+            try:
+                work_items = build_file_work_items(files_to_process)
+                progress_reporter.begin_stage(
+                    _FILE_INDEX_STAGE_PARSING,
+                    total=len(work_items),
+                )
+                parsed_results = parse_files_pipeline(work_items)
+                progress_reporter.advance(
+                    _FILE_INDEX_STAGE_PARSING,
+                    len(parsed_results),
+                )
+                progress_reporter.complete(_FILE_INDEX_STAGE_PARSING)
+
+                total_chunks = sum(
+                    len(parsed_result.chunks) for parsed_result in parsed_results
+                )
+                progress_reporter.begin_stage(
+                    _FILE_INDEX_STAGE_EMBEDDING,
+                    total=total_chunks,
+                )
+                progress_reporter.begin_stage(
+                    _FILE_INDEX_STAGE_STORING,
+                    total=total_chunks,
                 )
 
-                if parsed_result.has_error:
-                    skipped_count += 1
-                    error_console.print(
-                        f"[yellow]Skipped {file}: {parsed_result.error}[/yellow]"
-                    )
-                    _preserve_previous_file_state(
-                        incremental=incremental,
-                        state=file_state_entry,
-                        next_file_hashes=next_file_hashes,
-                        next_file_chunks=next_file_chunks,
-                    )
-                    continue
-
-                if not parsed_result.chunks:
-                    skipped_count += 1
-                    error_console.print(
-                        f"[yellow]Skipped {file}: no parseable content[/yellow]"
-                    )
-                    _preserve_previous_file_state(
-                        incremental=incremental,
-                        state=file_state_entry,
-                        next_file_hashes=next_file_hashes,
-                        next_file_chunks=next_file_chunks,
-                    )
-                    continue
-
-                file_states[rel_path_str] = file_state_entry
-                ordered_file_states.append(rel_path_str)
-
-                base_metadata = dict(parsed_result.work_item.metadata)
-                if blob_hash:
-                    base_metadata["blob_hash"] = blob_hash
-
-                for fallback_chunk_index, chunk in enumerate(parsed_result.chunks):
-                    metadata, chunk_index = _normalize_chunk_metadata(
-                        base_metadata=base_metadata,
-                        chunk_metadata=chunk.metadata,
-                        fallback_chunk_index=fallback_chunk_index,
-                    )
-                    file_state_entry.expected_chunks += 1
-                    batch_results = batch_manager.add(
-                        ChunkBatchItem(
-                            doc_id=_build_file_doc_id(parsed_result.work_item.path, chunk_index),
-                            text=chunk.text,
-                            metadata=metadata,
-                            file_path=parsed_result.work_item.path,
-                            relative_path=rel_path_str,
-                            chunk_index=chunk_index,
-                        )
-                    )
-                    _apply_chunk_batch_results(batch_results, file_states)
-
-            _apply_chunk_batch_results(batch_manager.flush(), file_states)
-
-            for rel_path_str in ordered_file_states:
-                file_state_entry = file_states[rel_path_str]
-                indexed_chunk_count = file_state_entry.indexed_chunks
-
-                if indexed_chunk_count <= 0:
-                    skipped_count += 1
-                    error_console.print(
-                        f"[yellow]Skipped {file_state_entry.file_path}: no parseable content[/yellow]"
-                    )
-                    _preserve_previous_file_state(
-                        incremental=incremental,
-                        state=file_state_entry,
-                        next_file_hashes=next_file_hashes,
-                        next_file_chunks=next_file_chunks,
-                    )
-                    continue
-
-                if (
-                    file_state_entry.errors
-                    or indexed_chunk_count != file_state_entry.expected_chunks
-                ):
-                    skipped_count += 1
-                    failure_reason = (
-                        file_state_entry.errors[0]
-                        if file_state_entry.errors
-                        else "one or more chunks failed to index"
-                    )
-                    error_console.print(
-                        f"[yellow]Skipped {file_state_entry.file_path}: {failure_reason}[/yellow]"
-                    )
-                    _preserve_previous_file_state(
-                        incremental=incremental,
-                        state=file_state_entry,
-                        next_file_hashes=next_file_hashes,
-                        next_file_chunks=next_file_chunks,
-                    )
-                    continue
-
-                indexed_count += 1
-                if incremental and file_state_entry.blob_hash:
-                    next_file_hashes[rel_path_str] = file_state_entry.blob_hash
-                    next_file_chunks[rel_path_str] = indexed_chunk_count
-
-                    if file_state_entry.previous_chunk_count > indexed_chunk_count:
-                        _delete_file_docs(
-                            store,
-                            rel_path_str,
-                            repo_root,
-                            start_chunk=indexed_chunk_count,
-                            chunk_count=file_state_entry.previous_chunk_count,
-                        )
-
-            # Handle deletions: files that were in state but are no longer tracked
-            if incremental and file_state:
-                deleted_files = set(file_state.keys()) - current_tracked_paths
-                if deleted_files:
-                    for deleted_path in deleted_files:
-                        _delete_file_docs(
-                            store,
-                            deleted_path,
-                            repo_root,
-                            chunk_count=file_chunks.get(deleted_path, 1),
-                        )
-
-            # Save updated file state
-            if incremental:
-                _save_file_state(
-                    state_file,
-                    index_path,
-                    next_file_hashes,
-                    next_file_chunks,
+                file_states: dict[str, _FileIndexBatchState] = {}
+                ordered_file_states: list[str] = []
+                batch_manager = BatchManager(
+                    flush_fn=lambda batch: _flush_file_chunk_batch(
+                        batch,
+                        embedder=embedder,
+                        store=store,
+                        on_stage_progress=progress_reporter.advance,
+                    ),
                 )
 
-        except Exception as e:
-            console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
-            raise typer.Exit(code=EXIT_ERROR)
+                for parsed_result in parsed_results:
+                    file = Path(parsed_result.work_item.path)
+                    rel_path_str = parsed_result.work_item.relative_path
+                    blob_hash = parsed_result.work_item.blob_hash
+                    previous_hash = file_state.get(rel_path_str)
+                    previous_chunk_count = file_chunks.get(rel_path_str, 1)
+                    file_state_entry = _FileIndexBatchState(
+                        file_path=file,
+                        relative_path=rel_path_str,
+                        blob_hash=blob_hash,
+                        previous_hash=previous_hash,
+                        previous_chunk_count=previous_chunk_count,
+                    )
+
+                    if parsed_result.has_error:
+                        skipped_count += 1
+                        error_console.print(
+                            f"[yellow]Skipped {file}: {parsed_result.error}[/yellow]"
+                        )
+                        _preserve_previous_file_state(
+                            incremental=incremental,
+                            state=file_state_entry,
+                            next_file_hashes=next_file_hashes,
+                            next_file_chunks=next_file_chunks,
+                        )
+                        continue
+
+                    if not parsed_result.chunks:
+                        skipped_count += 1
+                        error_console.print(
+                            f"[yellow]Skipped {file}: no parseable content[/yellow]"
+                        )
+                        _preserve_previous_file_state(
+                            incremental=incremental,
+                            state=file_state_entry,
+                            next_file_hashes=next_file_hashes,
+                            next_file_chunks=next_file_chunks,
+                        )
+                        continue
+
+                    file_states[rel_path_str] = file_state_entry
+                    ordered_file_states.append(rel_path_str)
+
+                    base_metadata = dict(parsed_result.work_item.metadata)
+                    if blob_hash:
+                        base_metadata["blob_hash"] = blob_hash
+
+                    for fallback_chunk_index, chunk in enumerate(parsed_result.chunks):
+                        metadata, chunk_index = _normalize_chunk_metadata(
+                            base_metadata=base_metadata,
+                            chunk_metadata=chunk.metadata,
+                            fallback_chunk_index=fallback_chunk_index,
+                        )
+                        file_state_entry.expected_chunks += 1
+                        batch_results = batch_manager.add(
+                            ChunkBatchItem(
+                                doc_id=_build_file_doc_id(parsed_result.work_item.path, chunk_index),
+                                text=chunk.text,
+                                metadata=metadata,
+                                file_path=parsed_result.work_item.path,
+                                relative_path=rel_path_str,
+                                chunk_index=chunk_index,
+                            )
+                        )
+                        _apply_chunk_batch_results(batch_results, file_states)
+
+                _apply_chunk_batch_results(batch_manager.flush(), file_states)
+                progress_reporter.complete(_FILE_INDEX_STAGE_EMBEDDING)
+                progress_reporter.complete(_FILE_INDEX_STAGE_STORING)
+
+                for rel_path_str in ordered_file_states:
+                    file_state_entry = file_states[rel_path_str]
+                    indexed_chunk_count = file_state_entry.indexed_chunks
+
+                    if indexed_chunk_count <= 0:
+                        skipped_count += 1
+                        error_console.print(
+                            f"[yellow]Skipped {file_state_entry.file_path}: no parseable content[/yellow]"
+                        )
+                        _preserve_previous_file_state(
+                            incremental=incremental,
+                            state=file_state_entry,
+                            next_file_hashes=next_file_hashes,
+                            next_file_chunks=next_file_chunks,
+                        )
+                        continue
+
+                    if (
+                        file_state_entry.errors
+                        or indexed_chunk_count != file_state_entry.expected_chunks
+                    ):
+                        skipped_count += 1
+                        failure_reason = (
+                            file_state_entry.errors[0]
+                            if file_state_entry.errors
+                            else "one or more chunks failed to index"
+                        )
+                        error_console.print(
+                            f"[yellow]Skipped {file_state_entry.file_path}: {failure_reason}[/yellow]"
+                        )
+                        _preserve_previous_file_state(
+                            incremental=incremental,
+                            state=file_state_entry,
+                            next_file_hashes=next_file_hashes,
+                            next_file_chunks=next_file_chunks,
+                        )
+                        continue
+
+                    indexed_count += 1
+                    if incremental and file_state_entry.blob_hash:
+                        next_file_hashes[rel_path_str] = file_state_entry.blob_hash
+                        next_file_chunks[rel_path_str] = indexed_chunk_count
+
+                        if file_state_entry.previous_chunk_count > indexed_chunk_count:
+                            _delete_file_docs(
+                                store,
+                                rel_path_str,
+                                repo_root,
+                                start_chunk=indexed_chunk_count,
+                                chunk_count=file_state_entry.previous_chunk_count,
+                            )
+
+                # Handle deletions: files that were in state but are no longer tracked
+                if incremental and file_state:
+                    deleted_files = set(file_state.keys()) - current_tracked_paths
+                    if deleted_files:
+                        for deleted_path in deleted_files:
+                            _delete_file_docs(
+                                store,
+                                deleted_path,
+                                repo_root,
+                                chunk_count=file_chunks.get(deleted_path, 1),
+                            )
+
+                # Save updated file state
+                if incremental:
+                    _save_file_state(
+                        state_file,
+                        index_path,
+                        next_file_hashes,
+                        next_file_chunks,
+                    )
+
+            except Exception as e:
+                console.print(f"[red]Error during indexing:[/red] {_escape_rich(str(e))}")
+                raise typer.Exit(code=EXIT_ERROR)
 
     if skipped_count > 0:
         console.print(
