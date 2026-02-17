@@ -294,6 +294,297 @@ impl DiffParser {
 }
 
 // =============================================================================
+// RST (reStructuredText) Parsing
+// =============================================================================
+
+/// Valid RST heading underline characters (rank from highest to lowest)
+const RST_HEADING_CHARS: &str = "=-~^+*`";
+
+/// Represents a chunk from an RST document.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RSTChunk {
+    /// The text content of the chunk
+    pub text: String,
+    /// Section path (list of heading texts from root to current)
+    pub section_path: Vec<String>,
+    /// Directive contents (note, warning, versionadded, etc.)
+    pub directives: std::collections::HashMap<String, Vec<String>>,
+    /// Temporal tags (deprecated, versionchanged, etc.)
+    pub temporal_tags: Vec<String>,
+    /// Index of this chunk in the document
+    pub chunk_index: u32,
+}
+
+/// Find all section boundaries in RST content.
+///
+/// Returns list of (line_number, heading_text, underline) tuples.
+/// Uses only valid RST heading underline characters.
+pub fn find_section_boundaries(content: &str) -> Vec<(usize, String, String)> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut boundaries = Vec::new();
+
+    for i in 0..lines.len() {
+        let line = lines[i];
+        // Skip empty lines
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Check if this line could be an underline (previous line was heading)
+        if i > 0 {
+            let prev_line = lines[i - 1];
+            let heading = prev_line.trim();
+            let underline = line.trim();
+
+            // Heading and underline must be non-empty
+            if heading.is_empty() || underline.is_empty() {
+                continue;
+            }
+
+            // Underline must be one repeated valid heading character
+            let underline_chars: Vec<char> = underline.chars().collect();
+            if underline_chars.is_empty() || !underline_chars.iter().all(|&c| c == underline_chars[0]) {
+                continue;
+            }
+
+            if !RST_HEADING_CHARS.contains(underline_chars[0]) {
+                continue;
+            }
+
+            // Underline must be at least as long as the heading text
+            if underline.len() >= heading.len() {
+                boundaries.push((i, heading.to_string(), underline.to_string()));
+            }
+        }
+    }
+
+    boundaries
+}
+
+/// Get heading level from underline character.
+pub fn get_heading_level(underline: &str) -> u32 {
+    if underline.is_empty() {
+        return 0;
+    }
+    let char = underline.chars().next().unwrap();
+    match char {
+        '=' => 1,
+        '-' => 2,
+        '~' => 3,
+        '^' => 4,
+        '+' => 5,
+        '*' => 6,
+        '`' => 7,
+        _ => 0,
+    }
+}
+
+/// Split content into chunks based on section boundaries.
+///
+/// Returns list of (start_line, end_line, section_path) tuples.
+pub fn chunk_by_sections(content: &str) -> Vec<(usize, usize, Vec<String>)> {
+    let lines: Vec<&str> = content.lines().collect();
+    let boundaries = find_section_boundaries(content);
+
+    if boundaries.is_empty() {
+        // No sections found, return whole content as single chunk
+        return vec![(0, lines.len(), vec![])];
+    }
+
+    let mut chunks = Vec::new();
+    let mut current_path: Vec<(String, u32)> = Vec::new(); // (heading, level)
+
+    // Preserve preamble content before the first section heading.
+    let first_heading_line = boundaries[0].0 - 1;
+    if first_heading_line > 0 {
+        chunks.push((0, first_heading_line, vec![]));
+    }
+
+    for i in 0..boundaries.len() {
+        let (line_num, heading, underline) = &boundaries[i];
+        let level = get_heading_level(underline);
+
+        // Remove any sections at same or higher level from path
+        while let Some((_, prev_level)) = current_path.last() {
+            if *prev_level >= level {
+                current_path.pop();
+            } else {
+                break;
+            }
+        }
+
+        // Add current section
+        current_path.push((heading.clone(), level));
+
+        // Determine chunk boundaries
+        let start_line = *line_num - 1;
+        let end_line = if i + 1 < boundaries.len() {
+            boundaries[i + 1].0 - 1
+        } else {
+            lines.len()
+        };
+
+        // Extract section path as list of headings
+        let section_path: Vec<String> = current_path.iter().map(|(h, _)| h.clone()).collect();
+
+        chunks.push((start_line, end_line, section_path));
+    }
+
+    chunks
+}
+
+/// Get text content for a chunk from line range.
+fn get_chunk_text(lines: &[&str], start: usize, end: usize) -> String {
+    lines[start..end].join("\n").trim().to_string()
+}
+
+/// Extract directive content from chunk text.
+pub fn extract_directives(chunk_text: &str) -> (std::collections::HashMap<String, Vec<String>>, Vec<String>) {
+    let mut directives: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut temporal_tags: Vec<String> = Vec::new();
+
+    // Note directive pattern
+    let note_re = regex::Regex::new(r"(?m)^\.\. note::(?:\s+(.*))?$\n((?:[ \t]+.+\n?)+)").unwrap();
+    for cap in note_re.captures_iter(chunk_text) {
+        if let Some(content) = cap.get(2) {
+            directives
+                .entry("note".to_string())
+                .or_insert_with(Vec::new)
+                .push(content.as_str().trim().to_string());
+        }
+    }
+
+    // Warning directive pattern
+    let warning_re = regex::Regex::new(r"(?m)^\.\. warning::(?:\s+(.*))?$\n((?:[ \t]+.+\n?)+)").unwrap();
+    for cap in warning_re.captures_iter(chunk_text) {
+        if let Some(content) = cap.get(2) {
+            directives
+                .entry("warning".to_string())
+                .or_insert_with(Vec::new)
+                .push(content.as_str().trim().to_string());
+        }
+    }
+
+    // Versionadded directive pattern (with optional version arg and content directly after)
+    let versionadded_re = regex::Regex::new(r"(?m)^\.\. versionadded::(?:\s+(.*))?$\n\n?((?:[ \t]+.+\n?)+)").unwrap();
+    for cap in versionadded_re.captures_iter(chunk_text) {
+        if let Some(content) = cap.get(2) {
+            directives
+                .entry("versionadded".to_string())
+                .or_insert_with(Vec::new)
+                .push(content.as_str().trim().to_string());
+        }
+    }
+
+    // Check for deprecated directive (temporal tag)
+    let deprecated_re = regex::Regex::new(r"(?m)^\.\. deprecated::\s*(.*?)(?:\n|$)").unwrap();
+    if deprecated_re.is_match(chunk_text) {
+        temporal_tags.push("deprecated".to_string());
+    }
+
+    // Check for versionchanged directive (temporal tag)
+    let versionchanged_re = regex::Regex::new(r"(?m)^\.\. versionchanged::\s*(.*?)(?:\n|$)").unwrap();
+    if versionchanged_re.is_match(chunk_text) {
+        temporal_tags.push("versionchanged".to_string());
+    }
+
+    (directives, temporal_tags)
+}
+
+/// Check for temporal directives and return tags.
+pub fn check_temporal_tags(text: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+
+    // Deprecated
+    let deprecated_re = regex::Regex::new(r"(?m)^\.\. deprecated::\s*(.*?)(?:\n|$)").unwrap();
+    if deprecated_re.is_match(text) {
+        tags.push("deprecated".to_string());
+    }
+
+    // Version changed
+    let versionchanged_re = regex::Regex::new(r"(?m)^\.\. versionchanged::\s*(.*?)(?:\n|$)").unwrap();
+    if versionchanged_re.is_match(text) {
+        tags.push("versionchanged".to_string());
+    }
+
+    tags
+}
+
+/// Parse RST content and return list of chunks with metadata.
+///
+/// Handles malformed/empty content gracefully by returning empty list.
+pub fn parse_rst_content(content: &str) -> Vec<RSTChunk> {
+    if content.trim().is_empty() {
+        return vec![];
+    }
+
+    let mut chunks: Vec<RSTChunk> = Vec::new();
+
+    // Handle common docutils parsing issues - normalize line endings
+    let normalized = content.replace("\r\n", "\n");
+
+    let lines: Vec<&str> = normalized.lines().collect();
+    let section_chunks = chunk_by_sections(&normalized);
+
+    for (idx, (start, end, section_path)) in section_chunks.iter().enumerate() {
+        let chunk_text = get_chunk_text(&lines, *start, *end);
+
+        if chunk_text.trim().is_empty() {
+            continue;
+        }
+
+        // Extract directives
+        let (directives, temporal_tags) = extract_directives(&chunk_text);
+
+        let chunk = RSTChunk {
+            text: chunk_text,
+            section_path: section_path.clone(),
+            directives,
+            temporal_tags,
+            chunk_index: idx as u32,
+        };
+        chunks.push(chunk);
+    }
+
+    chunks
+}
+
+/// Extract metadata from a chunk for indexing.
+pub fn get_chunk_metadata(chunk: &RSTChunk) -> std::collections::HashMap<String, serde_json::Value> {
+    use serde_json::{json, Value};
+
+    let mut metadata = std::collections::HashMap::new();
+
+    metadata.insert("chunk_index".to_string(), json!(chunk.chunk_index));
+    metadata.insert("section_path".to_string(), json!(chunk.section_path));
+    metadata.insert("has_directives".to_string(), json!(!chunk.directives.is_empty()));
+    metadata.insert("has_temporal_tags".to_string(), json!(!chunk.temporal_tags.is_empty()));
+
+    // Add directive content if present
+    if !chunk.directives.is_empty() {
+        // Convert directives to JSON value
+        let directives_json: std::collections::HashMap<String, Vec<Value>> = chunk
+            .directives
+            .iter()
+            .map(|(k, v)| (k.clone(), v.iter().map(|s| json!(s)).collect()))
+            .collect();
+        metadata.insert("directives".to_string(), json!(directives_json));
+    }
+
+    // Add temporal tags if present
+    if !chunk.temporal_tags.is_empty() {
+        metadata.insert("temporal_tags".to_string(), json!(chunk.temporal_tags));
+    }
+
+    // Add section depth
+    if !chunk.section_path.is_empty() {
+        metadata.insert("section_depth".to_string(), json!(chunk.section_path.len()));
+    }
+
+    metadata
+}
+
+// =============================================================================
 // Minimal Compile-Only Functions (Scaffolding)
 // =============================================================================
 
@@ -489,5 +780,209 @@ mod tests {
     #[test]
     fn test_placeholder() {
         assert_eq!(placeholder(), 42);
+    }
+
+    // =============================================================================
+    // RST Parsing Tests
+    // =============================================================================
+
+    #[test]
+    fn test_heading_level_equal_sign() {
+        assert_eq!(get_heading_level("="), 1);
+        assert_eq!(get_heading_level("==="), 1);
+    }
+
+    #[test]
+    fn test_heading_level_hyphen() {
+        assert_eq!(get_heading_level("-"), 2);
+        assert_eq!(get_heading_level("---"), 2);
+    }
+
+    #[test]
+    fn test_heading_level_tilde() {
+        assert_eq!(get_heading_level("~"), 3);
+        assert_eq!(get_heading_level("~~~"), 3);
+    }
+
+    #[test]
+    fn test_heading_level_caret() {
+        assert_eq!(get_heading_level("^"), 4);
+        assert_eq!(get_heading_level("^^^"), 4);
+    }
+
+    #[test]
+    fn test_heading_level_plus() {
+        assert_eq!(get_heading_level("+"), 5);
+        assert_eq!(get_heading_level("+++"), 5);
+    }
+
+    #[test]
+    fn test_find_section_boundaries_single() {
+        let content = "Title\n=====\n\nSome content here.";
+        let boundaries = find_section_boundaries(content);
+        assert_eq!(boundaries.len(), 1);
+        assert_eq!(boundaries[0].1, "Title");
+    }
+
+    #[test]
+    fn test_find_section_boundaries_multiple() {
+        let content = "Title\n=====\n\nSection One\n-----------\n\nContent one.\n\nSection Two\n-----------\n\nContent two.";
+        let boundaries = find_section_boundaries(content);
+        // Should find Title + 2 sections = 3 boundaries
+        assert_eq!(boundaries.len(), 3);
+    }
+
+    #[test]
+    fn test_find_section_boundaries_no_sections() {
+        let content = "Just some plain text.\nNo headings here.";
+        let boundaries = find_section_boundaries(content);
+        assert!(boundaries.is_empty());
+    }
+
+    #[test]
+    fn test_find_section_boundaries_mixed_underline() {
+        let content = "Title\n=-=\n\nBody text.";
+        let boundaries = find_section_boundaries(content);
+        assert!(boundaries.is_empty());
+    }
+
+    #[test]
+    fn test_chunk_single_section() {
+        let content = "Title\n=====\n\nThis is the content.";
+        let chunks = chunk_by_sections(content);
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn test_chunk_multiple_sections() {
+        let content = "Main Title\n============\n\nSection A\n---------\n\nContent A.\n\nSection B\n---------\n\nContent B.";
+        let chunks = chunk_by_sections(content);
+        assert!(chunks.len() >= 1);
+    }
+
+    #[test]
+    fn test_extract_note_directive() {
+        let text = "Section\n=======\n\nSome text.\n\n.. note::\n\n   This is a note.";
+        let (directives, _) = extract_directives(text);
+        assert!(directives.contains_key("note"));
+    }
+
+    #[test]
+    fn test_extract_warning_directive() {
+        let text = "Section\n=======\n\n.. warning::\n\n   This is a warning.";
+        let (directives, _) = extract_directives(text);
+        assert!(directives.contains_key("warning"));
+    }
+
+    #[test]
+    fn test_extract_versionadded_directive() {
+        let text = "Section\n=======\n\n.. versionadded:: 2.0\n\n   Added in version 2.0.";
+        let (directives, _) = extract_directives(text);
+        assert!(directives.contains_key("versionadded"));
+    }
+
+    #[test]
+    fn test_check_temporal_tags_deprecated() {
+        let text = "Section\n=======\n\n.. deprecated:: 1.5\n\n   Use new_function instead.";
+        let tags = check_temporal_tags(text);
+        assert!(tags.contains(&"deprecated".to_string()));
+    }
+
+    #[test]
+    fn test_check_temporal_tags_versionchanged() {
+        let text = "Section\n=======\n\n.. versionchanged:: 2.0\n\n   Changed in version 2.0.";
+        let tags = check_temporal_tags(text);
+        assert!(tags.contains(&"versionchanged".to_string()));
+    }
+
+    #[test]
+    fn test_check_temporal_tags_none() {
+        let text = "Section\n=======\n\nJust some content.";
+        let tags = check_temporal_tags(text);
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_simple_rst() {
+        let content = "Title\n=====\n\nThis is content.";
+        let chunks = parse_rst_content(content);
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_rst_with_section_hierarchy() {
+        let content = "Main Title\n============\n\nSection One\n-----------\n\nContent one.";
+        let chunks = parse_rst_content(content);
+        assert!(!chunks.is_empty());
+        assert!(!chunks[0].section_path.is_empty());
+    }
+
+    #[test]
+    fn test_parse_empty_content() {
+        let chunks = parse_rst_content("");
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_whitespace_only() {
+        let chunks = parse_rst_content("   \n\n   ");
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_chunk_metadata_basic() {
+        let chunk = RSTChunk {
+            text: "Test content".to_string(),
+            section_path: vec!["Section".to_string()],
+            directives: std::collections::HashMap::new(),
+            temporal_tags: vec![],
+            chunk_index: 0,
+        };
+        let metadata = get_chunk_metadata(&chunk);
+        assert_eq!(metadata.get("chunk_index"), Some(&serde_json::json!(0)));
+        assert_eq!(metadata.get("section_path"), Some(&serde_json::json!(["Section"])));
+        assert_eq!(metadata.get("has_directives"), Some(&serde_json::json!(false)));
+        assert_eq!(metadata.get("has_temporal_tags"), Some(&serde_json::json!(false)));
+    }
+
+    #[test]
+    fn test_chunk_metadata_with_directives() {
+        let mut directives = std::collections::HashMap::new();
+        directives.insert("note".to_string(), vec!["A note".to_string()]);
+        let chunk = RSTChunk {
+            text: "Test".to_string(),
+            section_path: vec![],
+            directives,
+            temporal_tags: vec![],
+            chunk_index: 0,
+        };
+        let metadata = get_chunk_metadata(&chunk);
+        assert_eq!(metadata.get("has_directives"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn test_chunk_metadata_with_temporal_tags() {
+        let chunk = RSTChunk {
+            text: "Test".to_string(),
+            section_path: vec![],
+            directives: std::collections::HashMap::new(),
+            temporal_tags: vec!["deprecated".to_string()],
+            chunk_index: 0,
+        };
+        let metadata = get_chunk_metadata(&chunk);
+        assert_eq!(metadata.get("has_temporal_tags"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn test_chunk_metadata_section_depth() {
+        let chunk = RSTChunk {
+            text: "Test".to_string(),
+            section_path: vec!["Main".to_string(), "Sub".to_string(), "SubSub".to_string()],
+            directives: std::collections::HashMap::new(),
+            temporal_tags: vec![],
+            chunk_index: 0,
+        };
+        let metadata = get_chunk_metadata(&chunk);
+        assert_eq!(metadata.get("section_depth"), Some(&serde_json::json!(3)));
     }
 }

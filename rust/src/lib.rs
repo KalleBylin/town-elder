@@ -103,10 +103,19 @@ pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_git_path, m)?)?;
     m.add_function(wrap_pyfunction!(extract_b_path, m)?)?;
 
+    // RST parsing
+    m.add_function(wrap_pyfunction!(parse_rst_content, m)?)?;
+    m.add_function(wrap_pyfunction!(find_section_boundaries, m)?)?;
+    m.add_function(wrap_pyfunction!(get_heading_level, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_directives, m)?)?;
+    m.add_function(wrap_pyfunction!(check_temporal_tags, m)?)?;
+    m.add_function(wrap_pyfunction!(get_chunk_metadata, m)?)?;
+
     // Add Python classes
     m.add_class::<PyTrackedFile>()?;
     m.add_class::<PyDiffFile>()?;
     m.add_class::<PyDiffParser>()?;
+    m.add_class::<PyRSTChunk>()?;
 
     m.add("__version__", te_core::get_version())?;
     Ok(())
@@ -213,4 +222,95 @@ fn parse_git_path(path: &str) -> String {
 #[pyfunction]
 fn extract_b_path(line: &str) -> Option<String> {
     te_core::extract_b_path(line)
+}
+
+// =============================================================================
+// RST Parsing Functions
+// =============================================================================
+
+/// Python representation of an RST chunk.
+#[pyclass(get, set)]
+pub struct PyRSTChunk {
+    pub text: String,
+    pub section_path: Vec<String>,
+    pub directives: std::collections::HashMap<String, Vec<String>>,
+    pub temporal_tags: Vec<String>,
+    pub chunk_index: u32,
+}
+
+#[pymethods]
+impl PyRSTChunk {
+    #[new]
+    fn new(
+        text: String,
+        section_path: Vec<String>,
+        directives: std::collections::HashMap<String, Vec<String>>,
+        temporal_tags: Vec<String>,
+        chunk_index: u32,
+    ) -> Self {
+        Self {
+            text,
+            section_path,
+            directives,
+            temporal_tags,
+            chunk_index,
+        }
+    }
+}
+
+/// Parse RST content and return list of chunks.
+#[pyfunction]
+fn parse_rst_content(content: &str) -> Vec<PyRSTChunk> {
+    te_core::parse_rst_content(content)
+        .into_iter()
+        .map(|chunk| PyRSTChunk {
+            text: chunk.text,
+            section_path: chunk.section_path,
+            directives: chunk.directives,
+            temporal_tags: chunk.temporal_tags,
+            chunk_index: chunk.chunk_index,
+        })
+        .collect()
+}
+
+/// Find section boundaries in RST content.
+#[pyfunction]
+fn find_section_boundaries(content: &str) -> Vec<(usize, String, String)> {
+    te_core::find_section_boundaries(content)
+}
+
+/// Get heading level from underline character.
+#[pyfunction]
+fn get_heading_level(underline: &str) -> u32 {
+    te_core::get_heading_level(underline)
+}
+
+/// Extract directives from chunk text.
+#[pyfunction]
+fn extract_directives(chunk_text: &str) -> (std::collections::HashMap<String, Vec<String>>, Vec<String>) {
+    te_core::extract_directives(chunk_text)
+}
+
+/// Check for temporal tags in text.
+#[pyfunction]
+fn check_temporal_tags(text: &str) -> Vec<String> {
+    te_core::check_temporal_tags(text)
+}
+
+/// Get chunk metadata as a dictionary.
+#[pyfunction]
+fn get_chunk_metadata(chunk: &PyRSTChunk) -> std::collections::HashMap<String, String> {
+    let te_chunk = te_core::RSTChunk {
+        text: chunk.text.clone(),
+        section_path: chunk.section_path.clone(),
+        directives: chunk.directives.clone(),
+        temporal_tags: chunk.temporal_tags.clone(),
+        chunk_index: chunk.chunk_index,
+    };
+
+    let metadata = te_core::get_chunk_metadata(&te_chunk);
+    metadata
+        .into_iter()
+        .map(|(k, v)| (k, v.to_string()))
+        .collect()
 }
