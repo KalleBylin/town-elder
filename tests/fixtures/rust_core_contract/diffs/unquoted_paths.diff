@@ -1,0 +1,7 @@
+diff --git a/path/with spaces/file.txt b/path/with spaces/file.txt
+new file mode 100644
+--- /dev/null
++++ b/path/with spaces/file.txt
+@@ -0,0 +1,2 @@
++Line 1
++Line 2

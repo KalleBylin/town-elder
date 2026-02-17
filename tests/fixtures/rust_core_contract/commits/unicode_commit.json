@@ -1,0 +1,7 @@
+{
+  "hash": "def456abc789012345678901234567890abcdef123",
+  "message": "添加新功能 - add Chinese chars",
+  "author": "张三",
+  "date": "2024-02-20T14:22:00+00:00",
+  "files_changed": ["src/中文.py", "docs/简介.md"]
+}
