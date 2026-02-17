@@ -16,6 +16,18 @@ from town_elder.cli import (
 from town_elder.cli import (
     _normalize_chunk_metadata as py_normalize_chunk_metadata,
 )
+from town_elder.git.diff_parser import (
+    DiffParser as PyDiffParser,
+)
+from town_elder.git.diff_parser import (
+    _extract_b_path as py_extract_b_path,
+)
+from town_elder.git.diff_parser import (
+    _parse_git_path as py_parse_git_path,
+)
+from town_elder.indexing.git_hash_scanner import (
+    TrackedFile as PyTrackedFile,
+)
 
 # Try to import the Rust extension - tests will be skipped if not available
 try:
@@ -28,6 +40,9 @@ except ImportError:
 
 DOC_ID_HEX_LENGTH = 16
 BASE_CHUNK_INDEX = 10
+_EXPECTED_TAB_PARTS = 2
+_EXPECTED_META_PARTS = 3
+_SHA1_HEX_LENGTH = 40
 
 
 # =============================================================================
@@ -309,3 +324,259 @@ class TestBackwardCompatibility:
         inputs = py_get_doc_id_inputs("test.py", Path("/Users/testuser/repo"))
         assert "test.py" in inputs
         assert len(inputs) >= 1
+
+
+# =============================================================================
+# Git Blob Parsing Parity Tests
+# =============================================================================
+
+class TestGitBlobParsingParity:
+    """Test parity between Python and Rust git blob parsing."""
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Valid lines
+            "100644 abc123def456789012345678901234567890000 0\tsrc/main.py",
+            "100755 abc123def456789012345678901234567890001 0\tsrc/utils.py",
+            "100644 0acd8c61f0d9dc1e5db7ad7c2dbce2bb16b8d6de 0\t.beads/.gitignore",
+            # Path with spaces
+            "100644 abc123def456789012345678901234567890002 0\tpath with spaces/file.txt",
+            # Unicode path
+            "100644 abc123def456789012345678901234567890003 0\t日本語/テスト.py",
+            # Path with special characters
+            "100644 abc123def456789012345678901234567890004 0\tpath/with-dash_and_underscore/file.py",
+        ],
+    )
+    def test_parse_git_blob_line_parity(self, line: str):
+        """Rust parsing should match Python for valid lines."""
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        # Get Python result
+        py_result = _parse_python_blob_line(line)
+
+        # Get Rust result
+        rust_result = te_core_rust.parse_git_blob_line(line)
+
+        # Compare
+        if py_result is None:
+            assert rust_result is None
+        else:
+            assert rust_result is not None
+            assert py_result.path == rust_result.path
+            assert py_result.blob_hash == rust_result.blob_hash
+            assert py_result.mode == rust_result.mode
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Invalid/unsupported modes - should be skipped
+            "120000 abc123def456789012345678901234567890005 0\tsymlink",  # Symlink
+            "000000 abc123def456789012345678901234567890006 0\tempty",  # Empty mode
+            # Malformed lines - should be safely ignored
+            "",
+            "not enough parts",
+            "100644",  # Missing blob hash and path
+            "notatab src/main.py",  # No tab separator
+            "100644 invalidhash path/file.py",  # Invalid hash (not 40 hex chars)
+            "100644 abc123def4567890123456789012345678900070 0",  # Missing path
+        ],
+    )
+    def test_parse_git_blob_line_skips_invalid(self, line: str):
+        """Invalid lines should return None in both Python and Rust."""
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        py_result = _parse_python_blob_line(line)
+        rust_result = te_core_rust.parse_git_blob_line(line)
+
+        assert py_result is None
+        assert rust_result is None
+
+
+def _parse_python_blob_line(line: str) -> PyTrackedFile | None:
+    """Helper to parse git blob line using Python implementation."""
+    if not line:
+        return None
+
+    parts = line.split("\t")
+    if len(parts) != _EXPECTED_TAB_PARTS:
+        return None
+
+    metadata, file_path = parts[0], parts[1]
+    meta_parts = metadata.split()
+    if len(meta_parts) != _EXPECTED_META_PARTS:
+        return None
+
+    mode, blob_hash, _stage = meta_parts
+
+    valid_modes = {"100644", "100755"}
+    if mode not in valid_modes:
+        return None
+
+    if len(blob_hash) != _SHA1_HEX_LENGTH or not all(c in "0123456789abcdefABCDEF" for c in blob_hash):
+        return None
+
+    return PyTrackedFile(path=file_path, blob_hash=blob_hash, mode=mode)
+
+
+# =============================================================================
+# Git Diff Parsing Parity Tests
+# =============================================================================
+
+class TestGitDiffParsingParity:
+    """Test parity between Python and Rust git diff parsing."""
+
+    @pytest.mark.parametrize(
+        "line,expected_b_path",
+        [
+            # Unquoted paths
+            ("diff --git a/src/main.py b/src/main.py", "b/src/main.py"),
+            ("diff --git a/src/utils.py b/src/utils.py", "b/src/utils.py"),
+            # Quoted paths with spaces
+            ('diff --git "a/path with spaces" "b/path with spaces"', "b/path with spaces"),
+            ('diff --git "a/file.txt" "b/file.txt"', "b/file.txt"),
+            # Unicode paths
+            ('diff --git "a/日本語/テスト.py" "b/日本語/テスト.py"', "b/日本語/テスト.py"),
+        ],
+    )
+    def test_extract_b_path_parity(self, line: str, expected_b_path: str):
+        """Rust b-path extraction should match Python."""
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        py_result = py_extract_b_path(line)
+        rust_result = te_core_rust.extract_b_path(line)
+
+        assert py_result == expected_b_path
+        assert rust_result == expected_b_path
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Invalid lines - should return None
+            "",
+            "not a diff header",
+            "diff",  # Incomplete
+            "diff --git",  # Missing paths
+            'diff --git "a/path',  # Unclosed quote
+        ],
+    )
+    def test_extract_b_path_returns_none_for_invalid(self, line: str):
+        """Invalid diff headers should return None."""
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        py_result = py_extract_b_path(line)
+        rust_result = te_core_rust.extract_b_path(line)
+
+        assert py_result is None
+        assert rust_result is None
+
+    @pytest.mark.parametrize(
+        "path,expected",
+        [
+            # Unquoted paths
+            ("b/src/main.py", "src/main.py"),
+            ("a/src/main.py", "src/main.py"),
+            ("src/main.py", "src/main.py"),  # No prefix
+            # Quoted paths
+            ('"b/path with spaces"', "path with spaces"),
+            ('"a/unicode/日本語.py"', "unicode/日本語.py"),
+        ],
+    )
+    def test_parse_git_path_parity(self, path: str, expected: str):
+        """Rust git path parsing should match Python."""
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        py_result = py_parse_git_path(path)
+        rust_result = te_core_rust.parse_git_path(path)
+
+        assert py_result == expected
+        assert rust_result == expected
+
+
+# =============================================================================
+# DiffParser Class Parity Tests
+# =============================================================================
+
+class TestDiffParserClassParity:
+    """Test parity between Python and Rust DiffParser class."""
+
+    @pytest.fixture
+    def sample_diff(self) -> str:
+        """Sample diff output for testing."""
+        return """diff --git a/src/main.py b/src/main.py
+new file mode 100644
+--- /dev/null
++++ b/src/main.py
+@@ -0,0 +1,5 @@
++def hello():
++    print("Hello, world!")
++
++if __name__ == "__main__":
++    hello()
+diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ -1,5 +1,6 @@
++import new_module
+ def main():
+-    old_call()
++    new_call()
+     return True
+"""
+
+    def test_parse_diff_files_parity(self, sample_diff: str):
+        """Rust DiffParser should match Python output."""
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        # Parse with Python
+        py_parser = PyDiffParser()
+        py_files = list(py_parser.parse(sample_diff))
+
+        # Parse with Rust
+        rust_parser = te_core_rust.PyDiffParser(warn_on_parse_error=True)
+        rust_files = rust_parser.parse(sample_diff)
+
+        # Compare file counts
+        assert len(py_files) == len(rust_files)
+
+        # Compare each file
+        for py_file, rust_file in zip(py_files, rust_files, strict=True):
+            assert py_file.path == rust_file.path
+            assert py_file.status == rust_file.status
+            assert len(py_file.hunks) == len(rust_file.hunks)
+
+    def test_parse_diff_to_text_parity(self, sample_diff: str):
+        """Rust parse_diff_to_text should match Python output."""
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        # Parse with Python
+        py_parser = PyDiffParser()
+        py_text = py_parser.parse_diff_to_text(sample_diff)
+
+        # Parse with Rust
+        rust_parser = te_core_rust.PyDiffParser(warn_on_parse_error=True)
+        rust_text = rust_parser.parse_diff_to_text(sample_diff)
+
+        # Compare
+        assert py_text == rust_text
+
+    def test_parse_empty_diff(self):
+        """Both parsers should handle empty diff."""
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        py_parser = PyDiffParser()
+        rust_parser = te_core_rust.PyDiffParser(warn_on_parse_error=True)
+
+        py_files = list(py_parser.parse(""))
+        rust_files = rust_parser.parse("")
+
+        assert len(py_files) == 0
+        assert len(rust_files) == 0

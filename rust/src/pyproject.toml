@@ -7,7 +7,7 @@ name = "town-elder-te-core"
 version = "0.1.0"
 
 [tool.maturin]
-manifest-path = "../Cargo.toml"
+manifest-path = "Cargo.toml"
 features = ["python"]
 module-name = "town_elder._te_core"
 target-dir = "../target"
