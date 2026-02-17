@@ -50,6 +50,30 @@ impl PyDiffFile {
     }
 }
 
+/// Python representation of a commit.
+#[pyclass]
+pub struct PyCommit {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+    pub files_changed: Vec<String>,
+}
+
+#[pymethods]
+impl PyCommit {
+    #[new]
+    fn new(hash: String, message: String, author: String, date: String, files_changed: Vec<String>) -> Self {
+        Self {
+            hash,
+            message,
+            author,
+            date,
+            files_changed,
+        }
+    }
+}
+
 /// Python DiffParser class.
 #[pyclass]
 pub struct PyDiffParser {
@@ -103,6 +127,23 @@ pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_git_path, m)?)?;
     m.add_function(wrap_pyfunction!(extract_b_path, m)?)?;
 
+    // Commit log parsing
+    m.add_function(wrap_pyfunction!(parse_commit_header, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_numstat_line, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_commits_with_numstat, m)?)?;
+    m.add_function(wrap_pyfunction!(is_commit_header_line, m)?)?;
+
+    // Diff truncation
+    m.add_function(wrap_pyfunction!(truncate_diff, m)?)?;
+    m.add_function(wrap_pyfunction!(is_diff_truncated, m)?)?;
+
+    // Commit text assembly
+    m.add_function(wrap_pyfunction!(assemble_commit_text, m)?)?;
+    m.add_function(wrap_pyfunction!(append_truncation_note, m)?)?;
+
+    // Constants
+    m.add("DEFAULT_MAX_DIFF_SIZE", te_core::DEFAULT_MAX_DIFF_SIZE)?;
+
     // RST parsing
     m.add_function(wrap_pyfunction!(parse_rst_content, m)?)?;
     m.add_function(wrap_pyfunction!(find_section_boundaries, m)?)?;
@@ -115,6 +156,7 @@ pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTrackedFile>()?;
     m.add_class::<PyDiffFile>()?;
     m.add_class::<PyDiffParser>()?;
+    m.add_class::<PyCommit>()?;
     m.add_class::<PyRSTChunk>()?;
 
     m.add("__version__", te_core::get_version())?;
@@ -313,4 +355,79 @@ fn get_chunk_metadata(chunk: &PyRSTChunk) -> std::collections::HashMap<String, S
         .into_iter()
         .map(|(k, v)| (k, v.to_string()))
         .collect()
+}
+
+// =============================================================================
+// Commit Log Parsing Functions
+// =============================================================================
+
+/// Parse a git log commit header line into a PyCommit.
+#[pyfunction]
+fn parse_commit_header(line: &str) -> Option<PyCommit> {
+    te_core::parse_commit_header(line).map(|c| PyCommit {
+        hash: c.hash,
+        message: c.message,
+        author: c.author,
+        date: c.date,
+        files_changed: c.files_changed,
+    })
+}
+
+/// Parse a numstat line to extract file path.
+#[pyfunction]
+fn parse_numstat_line(line: &str) -> Option<String> {
+    te_core::parse_numstat_line(line)
+}
+
+/// Parse git log output with numstat into PyCommit objects.
+#[pyfunction]
+fn parse_commits_with_numstat(output: &str) -> Vec<PyCommit> {
+    te_core::parse_commits_with_numstat(output)
+        .into_iter()
+        .map(|c| PyCommit {
+            hash: c.hash,
+            message: c.message,
+            author: c.author,
+            date: c.date,
+            files_changed: c.files_changed,
+        })
+        .collect()
+}
+
+/// Check if a line contains the commit record separator.
+#[pyfunction]
+fn is_commit_header_line(line: &str) -> bool {
+    te_core::is_commit_header_line(line)
+}
+
+// =============================================================================
+// Diff Truncation Functions
+// =============================================================================
+
+/// Truncate diff text if it exceeds the maximum size.
+#[pyfunction]
+fn truncate_diff(diff: &str, max_size: usize) -> String {
+    te_core::truncate_diff(diff, max_size)
+}
+
+/// Check if diff text contains the truncation marker.
+#[pyfunction]
+fn is_diff_truncated(diff: &str) -> bool {
+    te_core::is_diff_truncated(diff)
+}
+
+// =============================================================================
+// Commit Text Assembly Functions
+// =============================================================================
+
+/// Assemble commit text for embedding.
+#[pyfunction]
+fn assemble_commit_text(message: &str, diff_text: &str) -> String {
+    te_core::assemble_commit_text(message, diff_text)
+}
+
+/// Check if the original diff was truncated and append truncation note.
+#[pyfunction]
+fn append_truncation_note(text: &str, diff: &str) -> String {
+    te_core::append_truncation_note(text, diff)
 }

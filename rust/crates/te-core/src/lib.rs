@@ -10,6 +10,197 @@ use std::collections::HashMap;
 use std::path::Path;
 
 // =============================================================================
+// Git Log/Commit Parsing
+// =============================================================================
+
+/// Git log field separator (ASCII 31 - Unit Separator)
+const LOG_FIELD_SEPARATOR: char = '\x1f';
+/// Git log record separator (ASCII 30 - Record Separator)
+const LOG_RECORD_SEPARATOR: char = '\x1e';
+
+/// Minimum parts expected in git log format output (hash, message, author, date)
+const MIN_LOG_PARTS: usize = 4;
+/// Number of parts in numstat output (additions, deletions, filename)
+const NUMSTAT_PARTS: usize = 3;
+
+/// Default max diff size in bytes (100KB)
+pub const DEFAULT_MAX_DIFF_SIZE: usize = 100 * 1024;
+
+/// Represents a git commit with metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Commit {
+    /// Full commit hash
+    pub hash: String,
+    /// Commit message (subject line)
+    pub message: String,
+    /// Author name
+    pub author: String,
+    /// Author date as ISO 8601 string
+    pub date: String,
+    /// List of files changed in this commit
+    pub files_changed: Vec<String>,
+}
+
+/// Parse a git log commit header line.
+///
+/// Format: `<hash><field_separator><subject><field_separator><author><field_separator><date><record_separator>`
+///
+/// Returns Some(Commit) if parsing succeeds, None otherwise.
+pub fn parse_commit_header(line: &str) -> Option<Commit> {
+    // Remove record separator and trailing newlines
+    let line = line.trim_end_matches('\n').trim_end_matches(LOG_RECORD_SEPARATOR);
+
+    let parts: Vec<&str> = line.split(LOG_FIELD_SEPARATOR).collect();
+
+    if parts.len() < MIN_LOG_PARTS {
+        return None;
+    }
+
+    let hash = parts[0].trim().to_string();
+    let message = parts[1].to_string();
+    let author = parts[2].to_string();
+    let date = parts[3].to_string();
+
+    // Validate hash looks reasonable (at least 6 chars for short hash)
+    if hash.len() < 6 {
+        return None;
+    }
+
+    Some(Commit {
+        hash,
+        message,
+        author,
+        date,
+        files_changed: Vec::new(),
+    })
+}
+
+/// Parse a numstat line to extract file path.
+///
+/// Numstat format: `<additions><tab><deletions><tab><filename>`
+/// Binary files show `-` for additions and/or deletions.
+///
+/// Returns Some(file_path) if parsing succeeds, None otherwise.
+pub fn parse_numstat_line(line: &str) -> Option<String> {
+    let line = line.trim();
+
+    if line.is_empty() || !line.contains('\t') {
+        return None;
+    }
+
+    let parts: Vec<&str> = line.split('\t').collect();
+
+    if parts.len() < NUMSTAT_PARTS {
+        return None;
+    }
+
+    let file_path = parts[2].trim();
+
+    // Skip binary files (shown as `-`) and empty paths
+    if file_path.is_empty() || file_path == "-" {
+        return None;
+    }
+
+    Some(file_path.to_string())
+}
+
+/// Parse git log output with numstat into Commit objects.
+///
+/// Input: output from `git log --format=%H%x1f%s%x1f%an%x1f%aI%x1e --numstat`
+///
+/// Returns: Vector of Commit objects with files_changed populated.
+pub fn parse_commits_with_numstat(output: &str) -> Vec<Commit> {
+    let mut commits: Vec<Commit> = Vec::new();
+    let mut current_commit: Option<Commit> = None;
+    let mut current_files: Vec<String> = Vec::new();
+
+    for line in output.lines() {
+        // Check if this line starts a new commit (contains record separator)
+        if line.contains(LOG_RECORD_SEPARATOR) {
+            // Save previous commit if exists
+            if let Some(mut commit) = current_commit.take() {
+                commit.files_changed = current_files.clone();
+                commits.push(commit);
+            }
+
+            // Parse new commit header
+            current_commit = parse_commit_header(line);
+            current_files.clear();
+        } else if current_commit.is_some() {
+            // Try to parse as numstat line
+            if let Some(file_path) = parse_numstat_line(line) {
+                current_files.push(file_path);
+            }
+        }
+    }
+
+    // Don't forget the last commit
+    if let Some(mut commit) = current_commit {
+        commit.files_changed = current_files;
+        commits.push(commit);
+    }
+
+    commits
+}
+
+/// Check if a line contains the commit record separator.
+pub fn is_commit_header_line(line: &str) -> bool {
+    line.contains(LOG_RECORD_SEPARATOR)
+}
+
+// =============================================================================
+// Diff Truncation
+// =============================================================================
+
+/// Truncate diff text if it exceeds the maximum size.
+///
+/// Uses byte length to determine truncation. If truncation occurs,
+/// appends a message indicating the diff was truncated.
+///
+/// This matches the behavior in Python: `diff[:max_size] + f"\n\n[truncated - exceeded {max_size} byte limit]"`
+pub fn truncate_diff(diff: &str, max_size: usize) -> String {
+    if diff.len() <= max_size {
+        return diff.to_string();
+    }
+
+    let truncated = diff.get(..max_size).unwrap_or(diff);
+    format!("{truncated}\n\n[truncated - exceeded {max_size} byte limit]")
+}
+
+/// Check if diff text contains the truncation marker.
+pub fn is_diff_truncated(diff: &str) -> bool {
+    diff.contains("[truncated")
+}
+
+// =============================================================================
+// Commit Text Assembly
+// =============================================================================
+
+/// Assemble commit text for embedding.
+///
+/// Combines the commit message with the diff text to create the final
+/// text representation for embedding.
+///
+/// This matches the Python behavior:
+/// ```python
+/// text = f"Commit: {commit.message}\n\n{diff_text}"
+/// ```
+pub fn assemble_commit_text(message: &str, diff_text: &str) -> String {
+    format!("Commit: {message}\n\n{diff_text}")
+}
+
+/// Check if the original diff was truncated and append truncation note.
+///
+/// If the diff contains the truncation marker, appends a note to the text.
+pub fn append_truncation_note(text: &str, diff: &str) -> String {
+    if is_diff_truncated(diff) {
+        format!("{text} [diff was truncated due to size]")
+    } else {
+        text.to_string()
+    }
+}
+
+// =============================================================================
 // Git Blob Parsing (git ls-files --stage)
 // =============================================================================
 
@@ -984,5 +1175,239 @@ mod tests {
         };
         let metadata = get_chunk_metadata(&chunk);
         assert_eq!(metadata.get("section_depth"), Some(&serde_json::json!(3)));
+    }
+
+    // =============================================================================
+    // Commit Log Parsing Tests
+    // =============================================================================
+
+    #[test]
+    fn test_parse_commit_header_basic() {
+        let line = "abc123def456\x1fcommit message\x1fTest Author\x1f2024-01-01T00:00:00+00:00\x1e";
+        let commit = parse_commit_header(line);
+        assert!(commit.is_some());
+        let c = commit.unwrap();
+        assert_eq!(c.hash, "abc123def456");
+        assert_eq!(c.message, "commit message");
+        assert_eq!(c.author, "Test Author");
+        assert_eq!(c.date, "2024-01-01T00:00:00+00:00");
+        assert!(c.files_changed.is_empty());
+    }
+
+    #[test]
+    fn test_parse_commit_header_with_unicode_subject() {
+        // Test with Unicode characters in subject (café naïve)
+        let line = "hash123\x1ffeat: café naïve punctuation\x1fAuthor\x1f2024-01-01T00:00:00+00:00\x1e";
+        let commit = parse_commit_header(line);
+        assert!(commit.is_some());
+        let c = commit.unwrap();
+        assert_eq!(c.message, "feat: café naïve punctuation");
+    }
+
+    #[test]
+    fn test_parse_commit_header_with_delimiter_in_subject() {
+        // Test with delimiter characters in subject (||, <>, etc.)
+        let line = "hash123\x1ffix parser ||| edge case\x1fAuthor\x1f2024-01-01T00:00:00+00:00\x1e";
+        let commit = parse_commit_header(line);
+        assert!(commit.is_some());
+        let c = commit.unwrap();
+        assert_eq!(c.message, "fix parser ||| edge case");
+    }
+
+    #[test]
+    fn test_parse_commit_header_with_special_chars() {
+        // Test with various special characters
+        let line = "hash123\x1ffeat: test []{}<>|~!@\x1fAuthor\x1f2024-01-01T00:00:00+00:00\x1e";
+        let commit = parse_commit_header(line);
+        assert!(commit.is_some());
+        let c = commit.unwrap();
+        assert_eq!(c.message, "feat: test []{}<>|~!@");
+    }
+
+    #[test]
+    fn test_parse_commit_header_invalid_short_hash() {
+        // Test with too short hash
+        let line = "abc\x1fmessage\x1fAuthor\x1f2024-01-01T00:00:00+00:00\x1e";
+        let commit = parse_commit_header(line);
+        assert!(commit.is_none());
+    }
+
+    #[test]
+    fn test_parse_commit_header_invalid_not_enough_parts() {
+        // Test with not enough parts
+        let line = "hash123\x1fmessage\x1fAuthor\x1e";
+        let commit = parse_commit_header(line);
+        assert!(commit.is_none());
+    }
+
+    #[test]
+    fn test_parse_numstat_line_basic() {
+        let line = "10\t5\tsrc/main.rs";
+        let file_path = parse_numstat_line(line);
+        assert_eq!(file_path, Some("src/main.rs".to_string()));
+    }
+
+    #[test]
+    fn test_parse_numstat_line_binary_file() {
+        // Binary files show "-" for additions/deletions
+        let line = "-\t-\tbinary.png";
+        let file_path = parse_numstat_line(line);
+        assert_eq!(file_path, Some("binary.png".to_string()));
+    }
+
+    #[test]
+    fn test_parse_numstat_line_empty_path() {
+        let line = "10\t5\t";
+        let file_path = parse_numstat_line(line);
+        assert!(file_path.is_none());
+    }
+
+    #[test]
+    fn test_parse_numstat_line_dash_path() {
+        // Dash is used as a placeholder for binary files
+        let line = "10\t5\t-";
+        let file_path = parse_numstat_line(line);
+        assert!(file_path.is_none());
+    }
+
+    #[test]
+    fn test_parse_numstat_line_empty_line() {
+        let file_path = parse_numstat_line("");
+        assert!(file_path.is_none());
+    }
+
+    #[test]
+    fn test_parse_numstat_line_no_tabs() {
+        let file_path = parse_numstat_line("not a numstat line");
+        assert!(file_path.is_none());
+    }
+
+    #[test]
+    fn test_parse_commits_with_numstat_basic() {
+        let output = "abc123\x1fFirst commit\x1fAuthor\x1f2024-01-01T00:00:00+00:00\x1e\n\
+10\t5\tsrc/main.rs\n\
+5\t3\tsrc/lib.rs\n\
+def456\x1fSecond commit\x1fAuthor\x1f2024-01-02T00:00:00+00:00\x1e\n\
+20\t10\tREADME.md";
+
+        let commits = parse_commits_with_numstat(output);
+        assert_eq!(commits.len(), 2);
+
+        let c1 = &commits[0];
+        assert_eq!(c1.hash, "abc123");
+        assert_eq!(c1.message, "First commit");
+        assert_eq!(c1.files_changed.len(), 2);
+        assert!(c1.files_changed.contains(&"src/main.rs".to_string()));
+        assert!(c1.files_changed.contains(&"src/lib.rs".to_string()));
+
+        let c2 = &commits[1];
+        assert_eq!(c2.hash, "def456");
+        assert_eq!(c2.message, "Second commit");
+        assert_eq!(c2.files_changed.len(), 1);
+        assert!(c2.files_changed.contains(&"README.md".to_string()));
+    }
+
+    #[test]
+    fn test_parse_commits_with_numstat_binary_files() {
+        let output = "abc123\x1fAdd binary\x1fAuthor\x1f2024-01-01T00:00:00+00:00\x1e\n\
+-\t-\tbinary.png\n\
+0\t0\tREADME.md";
+
+        let commits = parse_commits_with_numstat(output);
+        assert_eq!(commits.len(), 1);
+        // Binary files should still be included
+        assert_eq!(commits[0].files_changed.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_commits_with_numstat_empty_output() {
+        let commits = parse_commits_with_numstat("");
+        assert!(commits.is_empty());
+    }
+
+    #[test]
+    fn test_is_commit_header_line() {
+        assert!(is_commit_header_line("abc123\x1emessage"));
+        assert!(is_commit_header_line("hash\x1fsubject\x1fauthor\x1fdate\x1e"));
+        assert!(!is_commit_header_line("10\t5\tfile.rs"));
+        assert!(!is_commit_header_line("not a header"));
+    }
+
+    // =============================================================================
+    // Diff Truncation Tests
+    // =============================================================================
+
+    #[test]
+    fn test_truncate_diff_under_limit() {
+        let diff = "diff content";
+        let result = truncate_diff(diff, 100);
+        assert_eq!(result, diff);
+    }
+
+    #[test]
+    fn test_truncate_diff_over_limit() {
+        let diff = "a".repeat(200);
+        let result = truncate_diff(&diff, 100);
+        assert!(result.len() < diff.len());
+        assert!(result.contains("[truncated"));
+        assert!(result.contains("100"));
+    }
+
+    #[test]
+    fn test_truncate_diff_exact_limit() {
+        // At exactly the limit, should not truncate
+        let diff = "a".repeat(100);
+        let result = truncate_diff(&diff, 100);
+        assert_eq!(result, diff);
+    }
+
+    #[test]
+    fn test_truncate_diff_zero_limit() {
+        let diff = "content";
+        let result = truncate_diff(diff, 0);
+        assert!(result.contains("[truncated"));
+    }
+
+    #[test]
+    fn test_is_diff_truncated() {
+        assert!(is_diff_truncated("content\n\n[truncated - exceeded 100 byte limit]"));
+        assert!(!is_diff_truncated("normal diff content"));
+    }
+
+    // =============================================================================
+    // Commit Text Assembly Tests
+    // =============================================================================
+
+    #[test]
+    fn test_assemble_commit_text() {
+        let message = "Fix bug";
+        let diff_text = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new";
+        let result = assemble_commit_text(message, diff_text);
+        assert!(result.starts_with("Commit: Fix bug\n\n"));
+        assert!(result.contains(diff_text));
+    }
+
+    #[test]
+    fn test_assemble_commit_text_empty_diff() {
+        let message = "Initial commit";
+        let diff_text = "";
+        let result = assemble_commit_text(message, diff_text);
+        assert_eq!(result, "Commit: Initial commit\n\n");
+    }
+
+    #[test]
+    fn test_append_truncation_note_not_truncated() {
+        let text = "Commit: test\n\ndiff content";
+        let diff = "normal diff";
+        let result = append_truncation_note(text, diff);
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_append_truncation_note_truncated() {
+        let text = "Commit: test\n\ndiff content";
+        let diff = "diff content\n\n[truncated - exceeded 100 byte limit]";
+        let result = append_truncation_note(text, diff);
+        assert!(result.contains("[diff was truncated due to size]"));
     }
 }
