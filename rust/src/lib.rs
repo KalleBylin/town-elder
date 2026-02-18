@@ -6,12 +6,12 @@
 //! The module is exposed as `town_elder._te_core`.
 
 use pyo3::prelude::*;
-use pyo3::types::PyBool;
-use std::collections::HashMap;
+use pyo3::types::{PyBool, PyDict};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Python representation of a tracked file.
-#[pyclass]
+#[pyclass(get_all)]
 pub struct PyTrackedFile {
     pub path: String,
     pub blob_hash: String,
@@ -31,7 +31,7 @@ impl PyTrackedFile {
 }
 
 /// Python representation of a diff file.
-#[pyclass]
+#[pyclass(get_all)]
 pub struct PyDiffFile {
     pub path: String,
     pub status: String,
@@ -51,7 +51,7 @@ impl PyDiffFile {
 }
 
 /// Python representation of a commit.
-#[pyclass]
+#[pyclass(get_all)]
 pub struct PyCommit {
     pub hash: String,
     pub message: String,
@@ -118,6 +118,9 @@ pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_file_doc_id, m)?)?;
     m.add_function(wrap_pyfunction!(get_doc_id_inputs, m)?)?;
     m.add_function(wrap_pyfunction!(normalize_chunk_metadata, m)?)?;
+    m.add_function(wrap_pyfunction!(scan_files, m)?)?;
+    m.add_function(wrap_pyfunction!(get_default_extensions, m)?)?;
+    m.add_function(wrap_pyfunction!(get_default_excludes, m)?)?;
 
     // Git blob parsing
     m.add_function(wrap_pyfunction!(parse_git_blob_line, m)?)?;
@@ -197,6 +200,45 @@ fn get_doc_id_inputs(path: &str, repo_root: &str) -> Vec<String> {
     te_core::get_doc_id_inputs(path, Path::new(repo_root))
 }
 
+/// Return scanner default file extensions.
+#[pyfunction]
+fn get_default_extensions() -> Vec<String> {
+    te_core::DEFAULT_FILE_EXTENSIONS
+        .iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+
+/// Return scanner default exclude patterns.
+#[pyfunction]
+fn get_default_excludes() -> Vec<String> {
+    te_core::DEFAULT_FILE_EXCLUDES
+        .iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+
+/// Scan files under a root directory and return deterministic path strings.
+#[pyfunction]
+#[pyo3(signature = (root_path, extensions=None, exclude_patterns=None))]
+fn scan_files(
+    root_path: &str,
+    extensions: Option<Vec<String>>,
+    exclude_patterns: Option<Vec<String>>,
+) -> Vec<String> {
+    let extension_set = extensions.map(|values| values.into_iter().collect::<HashSet<_>>());
+    let exclude_set = exclude_patterns.map(|values| values.into_iter().collect::<HashSet<_>>());
+
+    te_core::scan_files(
+        Path::new(root_path),
+        extension_set.as_ref(),
+        exclude_set.as_ref(),
+    )
+    .into_iter()
+    .map(|path| path.to_string_lossy().to_string())
+    .collect()
+}
+
 /// Normalize chunk metadata and return (metadata, chunk_index).
 #[pyfunction]
 fn normalize_chunk_metadata(
@@ -271,7 +313,7 @@ fn extract_b_path(line: &str) -> Option<String> {
 // =============================================================================
 
 /// Python representation of an RST chunk.
-#[pyclass(get, set)]
+#[pyclass(get_all, set_all)]
 pub struct PyRSTChunk {
     pub text: String,
     pub section_path: Vec<String>,
@@ -341,7 +383,10 @@ fn check_temporal_tags(text: &str) -> Vec<String> {
 
 /// Get chunk metadata as a dictionary.
 #[pyfunction]
-fn get_chunk_metadata(chunk: &PyRSTChunk) -> std::collections::HashMap<String, String> {
+fn get_chunk_metadata(
+    py: Python<'_>,
+    chunk: &PyRSTChunk,
+) -> PyResult<std::collections::HashMap<String, PyObject>> {
     let te_chunk = te_core::RSTChunk {
         text: chunk.text.clone(),
         section_path: chunk.section_path.clone(),
@@ -351,10 +396,44 @@ fn get_chunk_metadata(chunk: &PyRSTChunk) -> std::collections::HashMap<String, S
     };
 
     let metadata = te_core::get_chunk_metadata(&te_chunk);
-    metadata
-        .into_iter()
-        .map(|(k, v)| (k, v.to_string()))
-        .collect()
+    let mut python_metadata: std::collections::HashMap<String, PyObject> =
+        std::collections::HashMap::new();
+    for (key, value) in metadata {
+        python_metadata.insert(key, json_value_to_pyobject(py, &value)?);
+    }
+    Ok(python_metadata)
+}
+
+fn json_value_to_pyobject(py: Python<'_>, value: &serde_json::Value) -> PyResult<PyObject> {
+    let object = match value {
+        serde_json::Value::Null => py.None(),
+        serde_json::Value::Bool(inner) => inner.into_py(py),
+        serde_json::Value::Number(inner) => {
+            if let Some(inner) = inner.as_i64() {
+                inner.into_py(py)
+            } else if let Some(inner) = inner.as_u64() {
+                inner.into_py(py)
+            } else if let Some(inner) = inner.as_f64() {
+                inner.into_py(py)
+            } else {
+                py.None()
+            }
+        }
+        serde_json::Value::String(inner) => inner.into_py(py),
+        serde_json::Value::Array(inner) => inner
+            .iter()
+            .map(|item| json_value_to_pyobject(py, item))
+            .collect::<PyResult<Vec<_>>>()?
+            .into_py(py),
+        serde_json::Value::Object(inner) => {
+            let dict = PyDict::new_bound(py);
+            for (key, item) in inner {
+                dict.set_item(key, json_value_to_pyobject(py, item)?)?;
+            }
+            dict.into_py(py)
+        }
+    };
+    Ok(object)
 }
 
 // =============================================================================

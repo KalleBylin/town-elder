@@ -6,8 +6,8 @@
 //! - A Python extension module via PyO3
 //! - A standalone CLI binary via clap
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 
 // =============================================================================
 // Git Log/Commit Parsing
@@ -25,6 +25,137 @@ const NUMSTAT_PARTS: usize = 3;
 
 /// Default max diff size in bytes (100KB)
 pub const DEFAULT_MAX_DIFF_SIZE: usize = 100 * 1024;
+/// Default file extensions included during indexing.
+pub const DEFAULT_FILE_EXTENSIONS: &[&str] = &[".py", ".md", ".rst"];
+/// Default directory and glob-style exclusion patterns.
+pub const DEFAULT_FILE_EXCLUDES: &[&str] = &[
+    ".git",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".tox",
+    "venv",
+    ".env",
+    ".eggs",
+    "*.egg-info",
+    ".hg",
+    ".svn",
+    ".bzr",
+    "vendor",
+    "_build",
+];
+
+fn should_exclude(path: &Path, exclude_patterns: &HashSet<String>) -> bool {
+    for component in path.components() {
+        let part = component.as_os_str().to_string_lossy();
+        for pattern in exclude_patterns {
+            if pattern.starts_with('*') {
+                let suffix = &pattern[1..];
+                if part.ends_with(suffix) {
+                    return true;
+                }
+            } else if part == pattern.as_str() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Normalize absolute paths similarly to Python's `Path.resolve()` for
+/// non-strict path handling used by doc-id helper parity.
+fn normalize_absolute_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    normalized
+}
+
+/// Scan files under a root directory with extension/exclusion parity to
+/// the Python scanner implementation.
+pub fn scan_files(
+    root_path: &Path,
+    extensions: Option<&HashSet<String>>,
+    exclude_patterns: Option<&HashSet<String>>,
+) -> Vec<PathBuf> {
+    let extension_set: HashSet<String> = match extensions {
+        Some(exts) if !exts.is_empty() => exts.clone(),
+        _ => DEFAULT_FILE_EXTENSIONS
+            .iter()
+            .map(|ext| ext.to_string())
+            .collect(),
+    };
+
+    let mut effective_excludes: HashSet<String> = DEFAULT_FILE_EXCLUDES
+        .iter()
+        .map(|pattern| pattern.to_string())
+        .collect();
+    if let Some(custom_excludes) = exclude_patterns {
+        effective_excludes.extend(custom_excludes.iter().cloned());
+    }
+
+    fn collect_matching_files(
+        current_dir: &Path,
+        extension_set: &HashSet<String>,
+        exclude_patterns: &HashSet<String>,
+        files: &mut Vec<PathBuf>,
+    ) {
+        let entries = match std::fs::read_dir(current_dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if should_exclude(&path, exclude_patterns) {
+                continue;
+            }
+
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+
+            if file_type.is_dir() {
+                collect_matching_files(&path, extension_set, exclude_patterns, files);
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+
+            let path_str = path.to_string_lossy();
+            if extension_set.iter().any(|ext| path_str.ends_with(ext)) {
+                files.push(path);
+            }
+        }
+    }
+
+    if should_exclude(root_path, &effective_excludes) {
+        return Vec::new();
+    }
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_matching_files(root_path, &extension_set, &effective_excludes, &mut files);
+
+    files.sort_by_cached_key(|path| path.to_string_lossy().to_string());
+    files
+}
 
 /// Represents a git commit with metadata.
 #[derive(Debug, Clone, PartialEq)]
@@ -302,14 +433,14 @@ const GIT_DIFF_HEADER_PREFIX: &str = "diff --git";
 pub fn parse_git_path(path: &str) -> String {
     let mut path = path.to_string();
 
-    // Remove leading a/ or b/ prefix
-    if path.starts_with("a/") || path.starts_with("b/") {
-        path = path[2..].to_string();
-    }
-
-    // Handle quoted paths - remove surrounding quotes
+    // Handle quoted paths first.
     if path.starts_with('"') && path.ends_with('"') && path.len() >= 2 {
         path = path[1..path.len() - 1].to_string();
+    }
+
+    // Remove leading a/ or b/ prefix.
+    if path.starts_with("a/") || path.starts_with("b/") {
+        path = path[2..].to_string();
     }
 
     path
@@ -398,7 +529,7 @@ impl DiffParser {
         let mut current_hunk_lines: Vec<String> = Vec::new();
         let mut _parse_error_count: usize = 0;
 
-        for line in diff_output.lines() {
+        for line in diff_output.split('\n') {
             // New file start
             if line.starts_with("diff --git") {
                 // Yield previous file if exists
@@ -469,17 +600,13 @@ impl DiffParser {
 
     /// Convert a diff to plain text for embedding.
     pub fn parse_diff_to_text(&self, diff_output: &str) -> String {
-        let parts: Vec<String> = self
-            .parse(diff_output)
-            .iter()
-            .map(|diff_file| {
-                let mut file_parts = vec![format!("File: {} ({})", diff_file.path, diff_file.status)];
-                for hunk in &diff_file.hunks {
-                    file_parts.push(hunk.clone());
-                }
-                file_parts.join("\n")
-            })
-            .collect();
+        let mut parts: Vec<String> = Vec::new();
+        for diff_file in self.parse(diff_output) {
+            parts.push(format!("File: {} ({})", diff_file.path, diff_file.status));
+            for hunk in diff_file.hunks {
+                parts.push(hunk);
+            }
+        }
         parts.join("\n\n")
     }
 }
@@ -1206,6 +1333,65 @@ impl EmbeddingBackend for InMemoryBackend {
     }
 }
 
+/// Build indexable documents from files discovered under a root path.
+///
+/// This shares file scanning/chunking/doc-id logic with the Rust CLI so the
+/// binary stays as a thin command adapter.
+pub fn build_documents_from_files(
+    root_path: &Path,
+    extensions: Option<&HashSet<String>>,
+    exclude_patterns: Option<&HashSet<String>>,
+) -> Result<Vec<Document>, std::io::Error> {
+    use serde_json::json;
+
+    let mut documents: Vec<Document> = Vec::new();
+
+    for file_path in scan_files(root_path, extensions, exclude_patterns) {
+        let content = std::fs::read_to_string(&file_path)?;
+        let file_type = file_path
+            .extension()
+            .map(|ext| format!(".{}", ext.to_string_lossy()))
+            .unwrap_or_else(String::new);
+
+        let mut base_metadata = HashMap::new();
+        base_metadata.insert(
+            "source".to_string(),
+            json!(file_path.to_string_lossy().to_string()),
+        );
+        base_metadata.insert("type".to_string(), json!(file_type.clone()));
+
+        let chunks: Vec<(String, HashMap<String, serde_json::Value>)> = if file_type == ".rst" {
+            let rst_chunks = parse_rst_content(&content);
+            if rst_chunks.is_empty() {
+                vec![(content.clone(), HashMap::from([("chunk_index".to_string(), json!(0))]))]
+            } else {
+                rst_chunks
+                    .into_iter()
+                    .map(|chunk| {
+                        let metadata = get_chunk_metadata(&chunk);
+                        (chunk.text, metadata)
+                    })
+                    .collect()
+            }
+        } else {
+            vec![(content.clone(), HashMap::from([("chunk_index".to_string(), json!(0))]))]
+        };
+
+        let path_str = file_path.to_string_lossy().to_string();
+        for (fallback_chunk_index, (chunk_text, chunk_metadata)) in chunks.into_iter().enumerate() {
+            let (metadata, chunk_index) = normalize_chunk_metadata(
+                &base_metadata,
+                &chunk_metadata,
+                fallback_chunk_index as u32,
+            );
+            let doc_id = build_file_doc_id(&path_str, chunk_index);
+            documents.push(Document::new(doc_id, chunk_text, Some(metadata)));
+        }
+    }
+
+    Ok(documents)
+}
+
 // =============================================================================
 // Deterministic Doc-ID Generation
 // =============================================================================
@@ -1243,9 +1429,10 @@ pub fn get_doc_id_inputs(path: &str, repo_root: &Path) -> Vec<String> {
     // If path is not absolute, also try the resolved absolute path
     let path_obj = Path::new(path);
     if !path_obj.is_absolute() {
-        let absolute_path = repo_root.join(path_obj);
-        if let Some(resolved) = absolute_path.to_str() {
-            doc_id_inputs.push(resolved.to_string());
+        let absolute_path = normalize_absolute_path(&repo_root.join(path_obj));
+        let resolved = absolute_path.to_string_lossy().to_string();
+        if resolved != path {
+            doc_id_inputs.push(resolved);
         }
     }
 
@@ -1366,6 +1553,23 @@ pub fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn make_temp_dir(prefix: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "te-core-{prefix}-{}-{timestamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).expect("create temp directory");
+        directory
+    }
 
     #[test]
     fn test_version() {
@@ -1380,6 +1584,82 @@ mod tests {
     #[test]
     fn test_placeholder() {
         assert_eq!(placeholder(), 42);
+    }
+
+    #[test]
+    fn test_scan_files_matches_default_extensions_and_sorted_order() {
+        let root = make_temp_dir("scan-defaults");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src/a.py"), "print('a')").expect("write a.py");
+        fs::write(root.join("src/c.rst"), "Title\n=====\n").expect("write c.rst");
+        fs::write(root.join("src/b.md"), "# note").expect("write b.md");
+        fs::write(root.join("src/ignore.txt"), "ignore").expect("write txt");
+
+        let files = scan_files(&root, None, None);
+        let names: Vec<String> = files
+            .iter()
+            .map(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+
+        assert_eq!(names, vec!["a.py", "b.md", "c.rst"]);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn test_scan_files_applies_default_and_custom_excludes() {
+        let root = make_temp_dir("scan-excludes");
+        fs::create_dir_all(root.join("_build")).expect("create _build");
+        fs::create_dir_all(root.join("custom")).expect("create custom");
+        fs::write(root.join("_build/generated.py"), "generated").expect("write generated.py");
+        fs::write(root.join("custom/skip.py"), "skip").expect("write skip.py");
+        fs::write(root.join("keep.py"), "keep").expect("write keep.py");
+
+        let custom_excludes = HashSet::from(["custom".to_string()]);
+        let files = scan_files(&root, None, Some(&custom_excludes));
+        let names: Vec<String> = files
+            .iter()
+            .map(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+
+        assert_eq!(names, vec!["keep.py"]);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn test_get_doc_id_inputs_normalizes_relative_paths() {
+        let repo_root = Path::new("/Users/testuser/repo");
+        let inputs = get_doc_id_inputs("src/../src/main.py", repo_root);
+        assert!(inputs.contains(&"src/../src/main.py".to_string()));
+        assert!(inputs.contains(&"/Users/testuser/repo/src/main.py".to_string()));
+    }
+
+    #[test]
+    fn test_build_documents_from_files_creates_rst_chunks() {
+        let root = make_temp_dir("build-documents");
+        fs::create_dir_all(root.join("docs")).expect("create docs");
+        fs::write(
+            root.join("docs/guide.rst"),
+            "Guide\n=====\n\nIntro.\n\nSection\n-------\n\nBody.\n",
+        )
+        .expect("write rst");
+
+        let docs = build_documents_from_files(&root, None, None).expect("build docs");
+        assert!(docs.len() >= 2);
+        assert!(docs.iter().all(|doc| doc.metadata.contains_key("chunk_index")));
+        assert!(docs
+            .iter()
+            .any(|doc| doc.metadata.get("type") == Some(&serde_json::json!(".rst"))));
+        fs::remove_dir_all(root).ok();
     }
 
     // =============================================================================

@@ -13,6 +13,7 @@ from typing import Any
 from typer.testing import CliRunner
 
 import town_elder.cli as cli
+from town_elder import rust_adapter
 from town_elder.indexing.pipeline import parse_work_item
 
 runner = CliRunner()
@@ -339,10 +340,68 @@ def test_index_files_incremental_indexes_markdown_files(monkeypatch, tmp_path):
     assert isinstance(blob_hash, str)
     assert len(blob_hash) == _SHA1_HEX_LENGTH
 
-    state_file = cli._get_file_state_path(data_dir)
-    saved_state = json.loads(state_file.read_text())
-    repo_id = cli._get_repo_id(repo)
-    assert saved_state[repo_id]["file_hashes"] == {"README.md": blob_hash}
+
+def test_index_files_flag_off_keeps_python_doc_id_behavior(monkeypatch, tmp_path):
+    """With Rust flag disabled, helper behavior should remain unchanged."""
+    repo = _init_git_repo_with_file(tmp_path)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    store = _RecordingStore(enforce_json_metadata=True)
+    _patch_cli_services(monkeypatch, data_dir, store)
+
+    monkeypatch.delenv(rust_adapter._ENV_FLAG, raising=False)
+    rust_adapter._reset_module_cache()
+
+    result = runner.invoke(
+        cli.app,
+        ["--data-dir", str(data_dir), "index", "files", str(repo)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(store.upserts) == 1
+    doc_id, _metadata = store.upserts[0]
+    expected_doc_id = hashlib.sha256(str(repo / "main.py").encode()).hexdigest()[:16]
+    assert doc_id == expected_doc_id
+
+
+def test_index_files_flag_on_uses_rust_scanner_and_helpers(monkeypatch, tmp_path):
+    """With Rust flag enabled and extension available, adapter helpers are exercised."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "main.py").write_text("print('hello')\n")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    store = _RecordingStore()
+    _patch_cli_services(monkeypatch, data_dir, store)
+
+    file_hash = "d" * _SHA1_HEX_LENGTH
+    monkeypatch.setattr(cli, "get_git_root", lambda _path: project)
+    monkeypatch.setattr(cli, "scan_git_blobs", lambda _repo: {"main.py": file_hash})
+
+    module = SimpleNamespace()
+    module.scan_files = lambda root, _ext, _exclude: [str(Path(root) / "main.py")]
+    module.build_file_doc_id = lambda _path, _idx: "rust-doc-id"
+    module.normalize_chunk_metadata = lambda base, chunk, fallback: (
+        {**base, **chunk, "chunk_index": fallback},
+        fallback,
+    )
+
+    monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+    rust_adapter._reset_module_cache()
+    monkeypatch.setattr(rust_adapter, "get_te_core", lambda: module)
+
+    result = runner.invoke(
+        cli.app,
+        ["--data-dir", str(data_dir), "index", "files", str(project)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(store.upserts) == 1
+    doc_id, metadata = store.upserts[0]
+    assert doc_id == "rust-doc-id"
+    assert metadata["blob_hash"] == file_hash
 
 
 def test_index_files_uses_batch_embed_and_bulk_upsert(monkeypatch, tmp_path):

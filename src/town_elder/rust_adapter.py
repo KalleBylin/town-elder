@@ -15,7 +15,9 @@ Behavior:
 
 from __future__ import annotations
 
+import hashlib
 import os
+from pathlib import Path
 from typing import Any
 
 # =============================================================================
@@ -79,6 +81,13 @@ def get_te_core() -> Any | None:
     _module_checked = True
     if _check_rust_available():
         try:
+            import sys
+
+            cached_module = sys.modules.get("town_elder._te_core")
+            if cached_module is not None:
+                _te_core_module = cached_module
+                return _te_core_module
+
             # pylint: disable=import-error
             import town_elder._te_core as _te_core_module
             return _te_core_module
@@ -158,6 +167,118 @@ def version() -> str | None:
     try:
         return module.version()
     except Exception:  # noqa: BLE001
+        return None
+
+
+def scan_files(
+    root_path: Path,
+    extensions: frozenset[str] | None = None,
+    exclude_patterns: frozenset[str] | None = None,
+) -> list[Path]:
+    """Scan files using Rust when available, otherwise use Python scanner."""
+    module = get_te_core()
+    if module is not None:
+        try:
+            extension_values = sorted(extensions) if extensions else None
+            exclude_values = sorted(exclude_patterns) if exclude_patterns else None
+            return [
+                Path(path_value)
+                for path_value in module.scan_files(
+                    str(root_path),
+                    extension_values,
+                    exclude_values,
+                )
+            ]
+        except Exception:
+            pass
+
+    from town_elder.indexing.file_scanner import scan_files as python_scan_files
+
+    return python_scan_files(
+        root_path,
+        extensions=extensions,
+        exclude_patterns=exclude_patterns,
+    )
+
+
+def build_file_doc_id(path_value: str, chunk_index: int = 0) -> str:
+    """Build deterministic file doc IDs using Rust when available."""
+    module = get_te_core()
+    if module is not None:
+        try:
+            return module.build_file_doc_id(path_value, chunk_index)
+        except Exception:
+            pass
+
+    doc_id_input = path_value if chunk_index == 0 else f"{path_value}#chunk:{chunk_index}"
+    return hashlib.sha256(doc_id_input.encode()).hexdigest()[:16]
+
+
+def get_doc_id_inputs(path_value: str, repo_root: Path) -> set[str]:
+    """Return canonical and legacy doc-id inputs."""
+    module = get_te_core()
+    if module is not None:
+        try:
+            return set(module.get_doc_id_inputs(path_value, str(repo_root)))
+        except Exception:
+            pass
+
+    doc_id_inputs = {path_value}
+    path_obj = Path(path_value)
+    if not path_obj.is_absolute():
+        doc_id_inputs.add(str((repo_root / path_obj).resolve()))
+    return doc_id_inputs
+
+
+def normalize_chunk_metadata(
+    *,
+    base_metadata: dict[str, Any],
+    chunk_metadata: dict[str, Any],
+    fallback_chunk_index: int,
+) -> tuple[dict[str, Any], int]:
+    """Normalize chunk metadata and chunk index with parity-safe fallback."""
+    module = get_te_core()
+    if module is not None:
+        try:
+            return module.normalize_chunk_metadata(
+                base_metadata,
+                chunk_metadata,
+                fallback_chunk_index,
+            )
+        except Exception:
+            pass
+
+    metadata = dict(base_metadata)
+    metadata.update(chunk_metadata)
+
+    chunk_index_value = metadata.get("chunk_index")
+    if (
+        isinstance(chunk_index_value, bool)
+        or not isinstance(chunk_index_value, int)
+        or chunk_index_value < 0
+    ):
+        chunk_index = fallback_chunk_index
+        metadata["chunk_index"] = chunk_index
+    else:
+        chunk_index = chunk_index_value
+
+    return metadata, chunk_index
+
+
+def parse_rst_chunks(content: str) -> list[tuple[str, dict[str, Any]]] | None:
+    """Parse RST chunks via Rust and return `(text, metadata)` rows."""
+    module = get_te_core()
+    if module is None:
+        return None
+
+    try:
+        chunks = module.parse_rst_content(content)
+        parsed_chunks: list[tuple[str, dict[str, Any]]] = []
+        for chunk in chunks:
+            metadata = module.get_chunk_metadata(chunk)
+            parsed_chunks.append((chunk.text, metadata))
+        return parsed_chunks
+    except Exception:
         return None
 
 
@@ -309,7 +430,7 @@ def truncate_diff(diff: str, max_size: int) -> tuple[str, bool]:
     if module is not None:
         try:
             truncated = module.truncate_diff(diff, max_size)
-            was_truncated = module.is_diff_truncated(diff)
+            was_truncated = module.is_diff_truncated(truncated)
             return truncated, was_truncated
         except Exception:
             pass

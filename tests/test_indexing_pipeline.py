@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from town_elder.indexing.pipeline import (
     FileWorkItem,
     build_file_work_items,
@@ -73,3 +75,23 @@ def test_parse_files_pipeline_preserves_work_item_order(tmp_path: Path) -> None:
         "c.rst",
     ]
     assert all(not result.has_error for result in parsed_results)
+
+
+def test_parse_work_item_rst_prefers_rust_chunks_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    rst_file = tmp_path / "guide.rst"
+    rst_file.write_text("Guide\n=====\n\nBody.\n")
+
+    monkeypatch.setattr(
+        "town_elder.indexing.pipeline.parse_rst_chunks",
+        lambda _content: [("rust chunk", {"chunk_index": 0, "source": "rust"})],
+    )
+
+    result = parse_work_item(_make_item(rst_file, "guide.rst"))
+
+    assert not result.has_error
+    assert len(result.chunks) == 1
+    assert result.chunks[0].text == "rust chunk"
+    assert result.chunks[0].metadata["source"] == "rust"

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from town_elder import rust_adapter
+
+_FALLBACK_INDEX = 4
 
 
 class TestIsRustCoreEnabled:
@@ -253,3 +256,63 @@ class TestBackwardCompatibility:
         # health_check and version should also return None
         assert rust_adapter.health_check() is None
         assert rust_adapter.version() is None
+
+
+class TestHelperFallbacks:
+    """Tests for adapter helper fallbacks and parity-safe behavior."""
+
+    def test_build_file_doc_id_fallback_matches_python_hash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(rust_adapter, "get_te_core", lambda: None)
+
+        result = rust_adapter.build_file_doc_id("src/main.py", 2)
+
+        assert result == "4f2556b3f678a654"
+
+    def test_get_doc_id_inputs_fallback_includes_resolved_absolute(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(rust_adapter, "get_te_core", lambda: None)
+
+        inputs = rust_adapter.get_doc_id_inputs(
+            "src/main.py",
+            Path("/Users/testuser/repo"),
+        )
+
+        assert "src/main.py" in inputs
+        assert "/Users/testuser/repo/src/main.py" in inputs
+
+    def test_normalize_chunk_metadata_fallback_uses_fallback_index(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(rust_adapter, "get_te_core", lambda: None)
+
+        metadata, chunk_index = rust_adapter.normalize_chunk_metadata(
+            base_metadata={"source": "x"},
+            chunk_metadata={"chunk_index": True},
+            fallback_chunk_index=_FALLBACK_INDEX,
+        )
+
+        assert chunk_index == _FALLBACK_INDEX
+        assert metadata["chunk_index"] == _FALLBACK_INDEX
+
+
+class TestTruncateDiffAdapter:
+    """Tests for truncate_diff adapter behavior."""
+
+    def test_uses_truncated_result_when_checking_truncation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_module = mock.MagicMock()
+        mock_module.truncate_diff.return_value = (
+            "abc\n\n[truncated - exceeded 3 byte limit]"
+        )
+        mock_module.is_diff_truncated.side_effect = (
+            lambda value: value.endswith("byte limit]")
+        )
+        monkeypatch.setattr(rust_adapter, "get_te_core", lambda: mock_module)
+
+        truncated, was_truncated = rust_adapter.truncate_diff("abcdef", 3)
+
+        assert was_truncated is True
+        assert truncated == "abc\n\n[truncated - exceeded 3 byte limit]"
+        mock_module.is_diff_truncated.assert_called_once_with(truncated)

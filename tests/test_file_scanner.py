@@ -1,10 +1,20 @@
 """Tests for the file scanner module."""
 
+import pytest
+
+from town_elder import rust_adapter
 from town_elder.indexing.file_scanner import (
     DEFAULT_EXCLUDES,
     DEFAULT_EXTENSIONS,
     scan_files,
 )
+
+try:
+    import town_elder._te_core  # noqa: F401
+
+    RUST_AVAILABLE = True
+except ImportError:
+    RUST_AVAILABLE = False
 
 
 class TestDefaultConfiguration:
@@ -221,3 +231,45 @@ class TestPathValidation:
 
         assert len(files) == 1
         assert "src/pkg/module.py" in str(files[0])
+
+
+class TestRustScannerParity:
+    """Parity tests for Rust-backed scanner through the adapter boundary."""
+
+    def test_rust_scanner_matches_python_results(self, tmp_path, monkeypatch):
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        (tmp_path / "a.py").write_text("a")
+        (tmp_path / "b.md").write_text("b")
+        (tmp_path / "_build" / "generated.py").parent.mkdir(parents=True)
+        (tmp_path / "_build" / "generated.py").write_text("generated")
+        (tmp_path / "custom" / "skip.py").parent.mkdir(parents=True)
+        (tmp_path / "custom" / "skip.py").write_text("skip")
+
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        rust_adapter._reset_module_cache()
+
+        py_files = scan_files(tmp_path, exclude_patterns=frozenset({"custom"}))
+        rust_files = rust_adapter.scan_files(
+            tmp_path,
+            exclude_patterns=frozenset({"custom"}),
+        )
+
+        assert [str(path) for path in py_files] == [str(path) for path in rust_files]
+
+    def test_rust_scanner_deterministic_ordering(self, tmp_path, monkeypatch):
+        if not RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        (tmp_path / "z.py").write_text("z")
+        (tmp_path / "m.py").write_text("m")
+        (tmp_path / "a.py").write_text("a")
+
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        rust_adapter._reset_module_cache()
+
+        result1 = rust_adapter.scan_files(tmp_path)
+        result2 = rust_adapter.scan_files(tmp_path)
+
+        assert [str(path) for path in result1] == [str(path) for path in result2]

@@ -43,7 +43,6 @@ from town_elder.indexing.batch_manager import (
     ChunkBatchItem,
     ChunkBatchResult,
 )
-from town_elder.indexing.file_scanner import scan_files
 from town_elder.indexing.git_hash_scanner import (
     TrackedFile,
     get_git_root,
@@ -53,7 +52,21 @@ from town_elder.indexing.pipeline import (
     build_file_work_items,
     parse_files_pipeline,
 )
-from town_elder.rust_adapter import assemble_commit_text
+from town_elder.rust_adapter import (
+    assemble_commit_text,
+)
+from town_elder.rust_adapter import (
+    build_file_doc_id as rust_build_file_doc_id,
+)
+from town_elder.rust_adapter import (
+    get_doc_id_inputs as rust_get_doc_id_inputs,
+)
+from town_elder.rust_adapter import (
+    normalize_chunk_metadata as rust_normalize_chunk_metadata,
+)
+from town_elder.rust_adapter import (
+    scan_files as rust_scan_files,
+)
 
 app = typer.Typer(
     name="te",
@@ -568,19 +581,12 @@ def _extract_file_chunks(repo_state: dict[str, Any]) -> dict[str, int]:
 
 def _build_file_doc_id(path_value: str, chunk_index: int = 0) -> str:
     """Build deterministic doc ID for file content chunks."""
-
-    doc_id_input = path_value if chunk_index == 0 else f"{path_value}#chunk:{chunk_index}"
-    return hashlib.sha256(doc_id_input.encode()).hexdigest()[:16]
+    return rust_build_file_doc_id(path_value, chunk_index)
 
 
 def _get_doc_id_inputs(path_value: str, repo_root: Path) -> set[str]:
     """Return canonical and legacy ID input strings for a path."""
-
-    doc_id_inputs = {path_value}
-    path_obj = Path(path_value)
-    if not path_obj.is_absolute():
-        doc_id_inputs.add(str((repo_root / path_obj).resolve()))
-    return doc_id_inputs
+    return rust_get_doc_id_inputs(path_value, repo_root)
 
 
 def _delete_file_docs(
@@ -760,21 +766,11 @@ def _normalize_chunk_metadata(
     chunk_metadata: dict[str, Any],
     fallback_chunk_index: int,
 ) -> tuple[dict[str, Any], int]:
-    metadata = dict(base_metadata)
-    metadata.update(chunk_metadata)
-
-    chunk_index_value = metadata.get("chunk_index")
-    if (
-        isinstance(chunk_index_value, bool)
-        or not isinstance(chunk_index_value, int)
-        or chunk_index_value < 0
-    ):
-        chunk_index = fallback_chunk_index
-        metadata["chunk_index"] = chunk_index
-    else:
-        chunk_index = chunk_index_value
-
-    return metadata, chunk_index
+    return rust_normalize_chunk_metadata(
+        base_metadata=base_metadata,
+        chunk_metadata=chunk_metadata,
+        fallback_chunk_index=fallback_chunk_index,
+    )
 
 
 def _upsert_single_chunk(
@@ -1482,7 +1478,7 @@ def index_files(  # noqa: PLR0912
 
             # Use the scanner module for file discovery
             # This includes .py, .md, .rst by default and excludes _build, .git, etc.
-            files_to_index = scan_files(index_path, exclude_patterns=user_excludes)
+            files_to_index = rust_scan_files(index_path, exclude_patterns=user_excludes)
             progress_reporter.set_total(
                 _FILE_INDEX_STAGE_SCANNING,
                 total=len(files_to_index),

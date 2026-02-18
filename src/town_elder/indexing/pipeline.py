@@ -10,7 +10,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from town_elder.parsers.rst_handler import get_chunk_metadata, parse_rst_content
+from town_elder.parsers.rst_handler import (
+    get_chunk_metadata as python_get_chunk_metadata,
+)
+from town_elder.parsers.rst_handler import (
+    parse_rst_content as python_parse_rst_content,
+)
+from town_elder.rust_adapter import parse_rst_chunks
 
 
 @dataclass(frozen=True)
@@ -71,7 +77,18 @@ def _parse_plain_text(content: str) -> tuple[ParsedChunk, ...]:
 
 
 def _parse_rst_content(content: str) -> tuple[ParsedChunk, ...]:
-    rst_chunks = parse_rst_content(content)
+    rust_chunks = parse_rst_chunks(content)
+    if rust_chunks is not None:
+        if not rust_chunks:
+            # Preserve old behavior for empty/malformed files by indexing raw text.
+            return _parse_plain_text(content)
+
+        return tuple(
+            ParsedChunk(text=text, metadata=metadata)
+            for text, metadata in rust_chunks
+        )
+
+    rst_chunks = python_parse_rst_content(content)
     if not rst_chunks:
         # Preserve old behavior for empty/malformed files by indexing raw text.
         return _parse_plain_text(content)
@@ -81,7 +98,7 @@ def _parse_rst_content(content: str) -> tuple[ParsedChunk, ...]:
         parsed_chunks.append(
             ParsedChunk(
                 text=chunk.text,
-                metadata=get_chunk_metadata(chunk),
+                metadata=python_get_chunk_metadata(chunk),
             )
         )
     return tuple(parsed_chunks)

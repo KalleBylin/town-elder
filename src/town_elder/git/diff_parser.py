@@ -25,13 +25,13 @@ def _parse_git_path(path: str) -> str:
     Returns:
         The file path without the a/ or b/ prefix
     """
-    # Remove leading a/ or b/ prefix
-    if path.startswith("a/") or path.startswith("b/"):
-        path = path[2:]
-
     # Handle quoted paths - remove surrounding quotes
     if path.startswith('"') and path.endswith('"'):
         path = path[1:-1]
+
+    # Remove leading a/ or b/ prefix
+    if path.startswith("a/") or path.startswith("b/"):
+        path = path[2:]
 
     return path
 
@@ -120,6 +120,8 @@ class DiffParser:
             if line.startswith("diff --git"):
                 # Yield previous file if exists
                 if current_file:
+                    if current_hunk_lines:
+                        current_hunks.append("\n".join(current_hunk_lines))
                     yield DiffFile(
                         path=current_file,
                         status=current_status or "modified",
