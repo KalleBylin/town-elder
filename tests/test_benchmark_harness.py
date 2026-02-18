@@ -63,6 +63,10 @@ def test_benchmark_harness_smoke_generates_results(tmp_path: Path) -> None:
     assert payload["fixture"]["files"] == int(_SMOKE_FILE_COUNT)
     assert "baseline" in payload
     assert "optimized" in payload
+    assert "rust_enabled_files" in payload
+    assert "comparisons" in payload
+    assert "index_commits" in payload["comparisons"]
+    assert "query_baseline" in payload["comparisons"]
     assert payload["optimized"]["scan"]["throughput_files_per_s"] > 0
 
 

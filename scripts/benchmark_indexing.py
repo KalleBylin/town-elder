@@ -18,12 +18,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from town_elder import rust_adapter
+from town_elder.git.diff_parser import DiffParser
 from town_elder.indexing.batch_manager import (
     BatchManager,
     ChunkBatchItem,
     ChunkBatchResult,
 )
-from town_elder.indexing.file_scanner import scan_files
 from town_elder.indexing.pipeline import (
     ParsedFileResult,
     build_file_work_items,
@@ -38,6 +39,10 @@ _DEFAULT_BATCH_SIZE = 256
 _PROGRESS_STEP = 5_000
 _SINGLE_EMBED_PENALTY_ROUNDS = 40
 _BATCH_EMBED_PENALTY_ROUNDS = 8
+_COMMIT_BENCH_COMMITS = 1_000
+_QUERY_BENCH_QUERIES = 500
+_QUERY_CORPUS_SIZE = 1_500
+_DIFF_TRUNCATE_LIMIT = 8_192
 
 
 @dataclass(frozen=True)
@@ -123,6 +128,14 @@ def _throughput(units: int, duration_s: float) -> float:
     if duration_s <= 0:
         return 0.0
     return float(units) / duration_s
+
+
+def _set_rust_core_flag(enabled: bool) -> None:
+    if enabled:
+        os.environ[rust_adapter._ENV_FLAG] = "1"
+    else:
+        os.environ.pop(rust_adapter._ENV_FLAG, None)
+    rust_adapter._reset_module_cache()
 
 
 def _build_file_doc_id(path_value: str, chunk_index: int = 0) -> str:
@@ -234,7 +247,7 @@ def generate_fixture(root: Path, *, total_files: int, py_ratio: float, md_ratio:
 
 
 def _scan_and_build_work_items(root: Path) -> tuple[list[Path], list[Any]]:
-    files = scan_files(root)
+    files = rust_adapter.scan_files(root)
     files_to_process = [
         (path, str(path.relative_to(root)), None)
         for path in files
@@ -381,9 +394,89 @@ def run_optimized(root: Path, *, workers: int, batch_size: int) -> RunMetrics:
     )
 
 
+def run_rust_enabled_files(root: Path, *, workers: int, batch_size: int) -> RunMetrics:
+    """Benchmark file indexing with Rust adapter flag enabled."""
+    _set_rust_core_flag(True)
+    metrics = run_optimized(root, workers=workers, batch_size=batch_size)
+    return RunMetrics(
+        profile="rust_enabled_full",
+        parser_mode=metrics.parser_mode,
+        files_indexed=metrics.files_indexed,
+        chunks_indexed=metrics.chunks_indexed,
+        parse_errors=metrics.parse_errors,
+        unchanged_files=metrics.unchanged_files,
+        scan=metrics.scan,
+        parse=metrics.parse,
+        embed=metrics.embed,
+        total_wall_s=metrics.total_wall_s,
+    )
+
+
+def _build_synthetic_diff(index: int) -> str:
+    return (
+        f"diff --git a/src/file_{index}.py b/src/file_{index}.py\\n"
+        "index abc123..def456 100644\\n"
+        f"--- a/src/file_{index}.py\\n"
+        f"+++ b/src/file_{index}.py\\n"
+        "@@ -1,3 +1,4 @@\\n"
+        " def main():\\n"
+        "-    return False\\n"
+        "+    return True\\n"
+        "+    # updated\\n"
+    )
+
+
+def run_commit_index_benchmark(*, use_rust: bool) -> StageMetrics:
+    """Benchmark commit text preparation pipeline."""
+    _set_rust_core_flag(use_rust)
+    parser_factory = rust_adapter.get_diff_parser_factory()
+    parser = parser_factory() if parser_factory is not None else DiffParser()
+
+    start = time.perf_counter()
+    for index in range(_COMMIT_BENCH_COMMITS):
+        diff_text = parser.parse_diff_to_text(_build_synthetic_diff(index))
+        truncated, _ = rust_adapter.truncate_diff(diff_text, _DIFF_TRUNCATE_LIMIT)
+        _ = rust_adapter.assemble_commit_text(f"Commit {index}", truncated)
+    duration_s = time.perf_counter() - start
+
+    return StageMetrics(
+        duration_s=duration_s,
+        throughput_per_s=_throughput(_COMMIT_BENCH_COMMITS, duration_s),
+    )
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    numerator = sum(a * b for a, b in zip(left, right, strict=True))
+    left_norm = sum(value * value for value in left) ** 0.5
+    right_norm = sum(value * value for value in right) ** 0.5
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return numerator / (left_norm * right_norm)
+
+
+def run_query_baseline_benchmark(*, use_rust: bool) -> StageMetrics:
+    """Benchmark query scoring baseline with Rust flag toggled."""
+    _set_rust_core_flag(use_rust)
+
+    embedder = _DeterministicEmbedder(dimensions=24)
+    corpus = [f"document-{index}" for index in range(_QUERY_CORPUS_SIZE)]
+    corpus_vectors = embedder.embed(corpus)
+
+    start = time.perf_counter()
+    for query_index in range(_QUERY_BENCH_QUERIES):
+        query_vector = embedder.embed([f"query-{query_index}"])[0]
+        _ = max(_cosine_similarity(query_vector, candidate) for candidate in corpus_vectors)
+    duration_s = time.perf_counter() - start
+
+    return StageMetrics(
+        duration_s=duration_s,
+        throughput_per_s=_throughput(_QUERY_BENCH_QUERIES, duration_s),
+    )
+
+
 def run_rerun_hash_skip(root: Path, *, previous_hashes: dict[str, str]) -> RunMetrics:
     scan_start = time.perf_counter()
-    files = scan_files(root)
+    files = rust_adapter.scan_files(root)
     scan_duration_s = time.perf_counter() - scan_start
 
     compare_start = time.perf_counter()
@@ -448,7 +541,12 @@ def _render_markdown_report(  # noqa: PLR0913
     fixture: FixtureSummary,
     baseline: RunMetrics | None,
     optimized: RunMetrics,
+    rust_enabled: RunMetrics | None,
     rerun: RunMetrics | None,
+    commit_python: StageMetrics,
+    commit_rust: StageMetrics,
+    query_python: StageMetrics,
+    query_rust: StageMetrics,
     workers: int,
     batch_size: int,
 ) -> str:
@@ -478,6 +576,8 @@ def _render_markdown_report(  # noqa: PLR0913
     if baseline is not None:
         add_row(baseline)
     add_row(optimized)
+    if rust_enabled is not None:
+        add_row(rust_enabled)
     if rerun is not None:
         add_row(rerun)
 
@@ -494,6 +594,24 @@ def _render_markdown_report(  # noqa: PLR0913
         lines.append(
             f"- Total speedup: `{_speedup(baseline.total_wall_s, optimized.total_wall_s):.2f}x`"
         )
+
+    lines.append("")
+    lines.append("## Python vs Rust-Enabled Comparisons")
+    lines.append("")
+    lines.append("| Workflow | Python throughput/s | Rust-enabled throughput/s | Speedup |")
+    lines.append("|---|---:|---:|---:|")
+    lines.append(
+        "| index commits prep | "
+        f"{commit_python.throughput_per_s:,.1f} | "
+        f"{commit_rust.throughput_per_s:,.1f} | "
+        f"{_speedup(commit_rust.throughput_per_s, commit_python.throughput_per_s):.2f}x |"
+    )
+    lines.append(
+        "| query baseline | "
+        f"{query_python.throughput_per_s:,.1f} | "
+        f"{query_rust.throughput_per_s:,.1f} | "
+        f"{_speedup(query_rust.throughput_per_s, query_python.throughput_per_s):.2f}x |"
+    )
 
     return "\n".join(lines) + "\n"
 
@@ -517,6 +635,14 @@ def _print_run(label: str, metrics: RunMetrics) -> None:
         f"({metrics.embed.throughput_per_s:,.1f} chunks/s)"
     )
     print(f"  total: {metrics.total_wall_s:.3f}s")
+
+
+def _print_stage_benchmark(label: str, metrics: StageMetrics, unit_label: str) -> None:
+    print(f"\n[{label}]")
+    print(
+        f"  duration: {metrics.duration_s:.3f}s "
+        f"({metrics.throughput_per_s:,.1f} {unit_label}/s)"
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -627,6 +753,7 @@ def main() -> int:
         return 2
 
     baseline_metrics: RunMetrics | None = None
+    rust_enabled_metrics: RunMetrics | None = None
     rerun_metrics: RunMetrics | None = None
 
     try:
@@ -643,6 +770,8 @@ def main() -> int:
             f"(.py={fixture.counts['.py']}, .md={fixture.counts['.md']}, .rst={fixture.counts['.rst']})"
         )
 
+        _set_rust_core_flag(False)
+
         if not args.skip_baseline:
             baseline_metrics = run_baseline(fixture.root)
             _print_run("baseline_full", baseline_metrics)
@@ -654,12 +783,30 @@ def main() -> int:
         )
         _print_run("optimized_full", optimized_metrics)
 
+        rust_enabled_metrics = run_rust_enabled_files(
+            fixture.root,
+            workers=args.workers,
+            batch_size=args.batch_size,
+        )
+        _print_run("rust_enabled_full", rust_enabled_metrics)
+
         if not args.skip_rerun:
+            _set_rust_core_flag(False)
             rerun_metrics = run_rerun_hash_skip(
                 fixture.root,
                 previous_hashes=fixture.blob_hashes,
             )
             _print_run("optimized_rerun_hash_skip", rerun_metrics)
+
+        commit_python = run_commit_index_benchmark(use_rust=False)
+        commit_rust = run_commit_index_benchmark(use_rust=True)
+        query_python = run_query_baseline_benchmark(use_rust=False)
+        query_rust = run_query_baseline_benchmark(use_rust=True)
+
+        _print_stage_benchmark("index_commits_python", commit_python, "commits")
+        _print_stage_benchmark("index_commits_rust", commit_rust, "commits")
+        _print_stage_benchmark("query_baseline_python", query_python, "queries")
+        _print_stage_benchmark("query_baseline_rust", query_rust, "queries")
 
         results: dict[str, Any] = {
             "fixture": {
@@ -674,6 +821,37 @@ def main() -> int:
                 "skip_rerun": args.skip_rerun,
             },
             "optimized": _metrics_to_dict(optimized_metrics),
+            "rust_enabled_files": _metrics_to_dict(rust_enabled_metrics),
+            "comparisons": {
+                "index_commits": {
+                    "python": {
+                        "duration_s": commit_python.duration_s,
+                        "throughput_commits_per_s": commit_python.throughput_per_s,
+                    },
+                    "rust_enabled": {
+                        "duration_s": commit_rust.duration_s,
+                        "throughput_commits_per_s": commit_rust.throughput_per_s,
+                    },
+                    "speedup_x": _speedup(
+                        commit_rust.throughput_per_s,
+                        commit_python.throughput_per_s,
+                    ),
+                },
+                "query_baseline": {
+                    "python": {
+                        "duration_s": query_python.duration_s,
+                        "throughput_queries_per_s": query_python.throughput_per_s,
+                    },
+                    "rust_enabled": {
+                        "duration_s": query_rust.duration_s,
+                        "throughput_queries_per_s": query_rust.throughput_per_s,
+                    },
+                    "speedup_x": _speedup(
+                        query_rust.throughput_per_s,
+                        query_python.throughput_per_s,
+                    ),
+                },
+            },
         }
         if baseline_metrics is not None:
             results["baseline"] = _metrics_to_dict(baseline_metrics)
@@ -705,7 +883,12 @@ def main() -> int:
                 fixture=fixture,
                 baseline=baseline_metrics,
                 optimized=optimized_metrics,
+                rust_enabled=rust_enabled_metrics,
                 rerun=rerun_metrics,
+                commit_python=commit_python,
+                commit_rust=commit_rust,
+                query_python=query_python,
+                query_rust=query_rust,
                 workers=args.workers,
                 batch_size=args.batch_size,
             )

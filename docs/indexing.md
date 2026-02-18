@@ -63,6 +63,10 @@ Use `scripts/benchmark_indexing.py` to generate large synthetic fixtures and mea
 - parse throughput
 - embed throughput
 - total wall time
+- Python vs Rust-enabled comparisons for:
+  - file indexing
+  - commit indexing prep
+  - query baseline
 
 ### 60k Fixture Benchmark
 
@@ -70,14 +74,14 @@ Use `scripts/benchmark_indexing.py` to generate large synthetic fixtures and mea
 PYTHONPATH=src python scripts/benchmark_indexing.py \
   --files 60000 \
   --workers 8 \
-  --output-json docs/benchmarks/indexing-60k-2026-02-17.json \
-  --output-md docs/benchmarks/indexing-60k-2026-02-17.md
+  --output-json docs/benchmarks/rust-rollout-<date>.json \
+  --output-md docs/benchmarks/rust-rollout-<date>.md
 ```
 
 Results artifact:
 
-- `docs/benchmarks/indexing-60k-2026-02-17.json`
-- `docs/benchmarks/indexing-60k-2026-02-17.md`
+- `docs/benchmarks/rust-rollout-<date>.json`
+- `docs/benchmarks/rust-rollout-<date>.md`
 
 ## Test Strategy for Benchmark Tooling
 

@@ -1,0 +1,130 @@
+{
+  "fixture": {
+    "root": "/var/folders/_4/8sjtm1x16f71gfzqwhwjj9qr0000gn/T/te-index-benchmark-qcydbfo7",
+    "files": 120,
+    "counts": {
+      ".py": 60,
+      ".md": 36,
+      ".rst": 24
+    }
+  },
+  "config": {
+    "workers": 1,
+    "batch_size": 32,
+    "skip_baseline": false,
+    "skip_rerun": false
+  },
+  "optimized": {
+    "profile": "optimized_full",
+    "parser_mode": "sequential_fallback",
+    "files_indexed": 120,
+    "chunks_indexed": 144,
+    "parse_errors": 0,
+    "unchanged_files": 0,
+    "scan": {
+      "duration_s": 0.002477167174220085,
+      "throughput_files_per_s": 48442.43103527358
+    },
+    "parse": {
+      "duration_s": 0.002507416997104883,
+      "throughput_files_per_s": 47858.01489682592
+    },
+    "embed": {
+      "duration_s": 6.691599264740944e-05,
+      "throughput_chunks_per_s": 2151951.9370916
+    },
+    "total_wall_s": 0.005051500163972378
+  },
+  "rust_enabled_files": {
+    "profile": "rust_enabled_full",
+    "parser_mode": "sequential_fallback",
+    "files_indexed": 120,
+    "chunks_indexed": 144,
+    "parse_errors": 0,
+    "unchanged_files": 0,
+    "scan": {
+      "duration_s": 0.00366824958473444,
+      "throughput_files_per_s": 32713.150299092125
+    },
+    "parse": {
+      "duration_s": 0.120943000074476,
+      "throughput_files_per_s": 992.2029379633769
+    },
+    "embed": {
+      "duration_s": 7.11251050233841e-05,
+      "throughput_chunks_per_s": 2024601.5798873904
+    },
+    "total_wall_s": 0.12468237476423383
+  },
+  "comparisons": {
+    "index_commits": {
+      "python": {
+        "duration_s": 0.001937124878168106,
+        "throughput_commits_per_s": 516228.9800055001
+      },
+      "rust_enabled": {
+        "duration_s": 0.009044624865055084,
+        "throughput_commits_per_s": 110562.90503143048
+      },
+      "speedup_x": 0.21417415393892164
+    },
+    "query_baseline": {
+      "python": {
+        "duration_s": 1.3624165831133723,
+        "throughput_queries_per_s": 366.9949457436932
+      },
+      "rust_enabled": {
+        "duration_s": 1.3792657079175115,
+        "throughput_queries_per_s": 362.51173151758155
+      },
+      "speedup_x": 0.9877839891853913
+    }
+  },
+  "baseline": {
+    "profile": "baseline_full",
+    "parser_mode": "sequential",
+    "files_indexed": 120,
+    "chunks_indexed": 144,
+    "parse_errors": 0,
+    "unchanged_files": 0,
+    "scan": {
+      "duration_s": 0.0029940828680992126,
+      "throughput_files_per_s": 40079.05101042903
+    },
+    "parse": {
+      "duration_s": 0.0025860420428216457,
+      "throughput_files_per_s": 46402.957884268304
+    },
+    "embed": {
+      "duration_s": 0.001322791911661625,
+      "throughput_chunks_per_s": 108860.65958712615
+    },
+    "total_wall_s": 0.006902916822582483
+  },
+  "speedups": {
+    "parse_x": 1.0313569884098037,
+    "embed_x": 19.767948726870376,
+    "total_x": 1.3665082843735268
+  },
+  "rerun": {
+    "profile": "optimized_rerun_hash_skip",
+    "parser_mode": "n/a",
+    "files_indexed": 0,
+    "chunks_indexed": 0,
+    "parse_errors": 0,
+    "unchanged_files": 120,
+    "scan": {
+      "duration_s": 0.0010254168882966042,
+      "throughput_files_per_s": 117025.57405636343
+    },
+    "parse": {
+      "duration_s": 0.0,
+      "throughput_files_per_s": 0.0
+    },
+    "embed": {
+      "duration_s": 0.0,
+      "throughput_chunks_per_s": 0.0
+    },
+    "total_wall_s": 0.002576707862317562
+  }
+}
