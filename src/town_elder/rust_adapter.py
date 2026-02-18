@@ -196,3 +196,124 @@ def _reset_module_cache() -> None:
     global _te_core_module, _module_checked
     _te_core_module = None
     _module_checked = False
+
+
+# =============================================================================
+# Diff Parser Adapter
+# =============================================================================
+
+class RustDiffParser:
+    """Rust-backed diff parser that wraps PyDiffParser.
+
+    This class provides the same interface as Python's DiffParser but uses
+    the Rust implementation for parsing diffs to text.
+    """
+
+    def __init__(self, warn_on_parse_error: bool = True):
+        """Initialize the Rust diff parser.
+
+        Args:
+            warn_on_parse_error: If True, log warnings when diff headers fail to parse.
+        """
+        module = get_te_core()
+        if module is None:
+            raise RustExtensionNotAvailableError(
+                "Rust core is not available for DiffParser"
+            )
+        self._parser = module.PyDiffParser(warn_on_parse_error)
+
+    def parse(self, diff_output: str):
+        """Parse git diff output into file changes.
+
+        Returns:
+            Iterator of DiffFile objects.
+        """
+        # Import here to avoid circular imports
+        from town_elder.git.diff_parser import DiffFile
+        for df in self._parser.parse(diff_output):
+            yield DiffFile(
+                path=df.path,
+                status=df.status,
+                hunks=df.hunks,
+            )
+
+    def parse_diff_to_text(self, diff_output: str) -> str:
+        """Convert a diff to plain text for embedding.
+
+        Args:
+            diff_output: The raw git diff output.
+
+        Returns:
+            Plain text representation of the diff.
+        """
+        return self._parser.parse_diff_to_text(diff_output)
+
+
+def get_diff_parser_factory() -> type | None:
+    """Get the Rust-backed DiffParser class if available and enabled.
+
+    Returns:
+        RustDiffParser class if Rust is enabled and available, None otherwise.
+    """
+    if not is_rust_core_enabled():
+        return None
+
+    module = get_te_core()
+    if module is None:
+        return None
+
+    # Verify PyDiffParser is available
+    try:
+        _ = module.PyDiffParser
+    except AttributeError:
+        return None
+
+    return RustDiffParser
+
+
+# =============================================================================
+# Commit Text Assembly Functions
+# =============================================================================
+
+def assemble_commit_text(message: str, diff_text: str) -> str:
+    """Assemble commit text for embedding using Rust if available.
+
+    Args:
+        message: The commit message.
+        diff_text: The diff text.
+
+    Returns:
+        Assembled commit text for embedding.
+    """
+    module = get_te_core()
+    if module is not None:
+        try:
+            return module.assemble_commit_text(message, diff_text)
+        except Exception:
+            pass
+    # Fallback to Python implementation
+    return f"Commit: {message}\n\n{diff_text}"
+
+
+def truncate_diff(diff: str, max_size: int) -> tuple[str, bool]:
+    """Truncate diff text if it exceeds maximum size using Rust if available.
+
+    Args:
+        diff: The diff text.
+        max_size: Maximum size in bytes.
+
+    Returns:
+        Tuple of (truncated diff, was_truncated).
+    """
+    module = get_te_core()
+    if module is not None:
+        try:
+            truncated = module.truncate_diff(diff, max_size)
+            was_truncated = module.is_diff_truncated(diff)
+            return truncated, was_truncated
+        except Exception:
+            pass
+    # Fallback to Python implementation
+    if len(diff.encode()) > max_size:
+        return diff[:max_size] + f"\n\n[truncated - exceeded {max_size} byte limit]", True
+    return diff, False

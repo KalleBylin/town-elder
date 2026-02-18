@@ -53,6 +53,7 @@ from town_elder.indexing.pipeline import (
     build_file_work_items,
     parse_files_pipeline,
 )
+from town_elder.rust_adapter import assemble_commit_text
 
 app = typer.Typer(
     name="te",
@@ -1928,10 +1929,8 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
                         diff = diffs.get(commit.hash, "")
                         diff_text = diff_parser.parse_diff_to_text(diff)
 
-                        if "[truncated" in diff:
-                            diff_text += " [diff was truncated due to size]"
-
-                        text = f"Commit: {commit.message}\n\n{diff_text}"
+                        # Use Rust's assemble_commit_text when available (falls back to Python)
+                        text = assemble_commit_text(commit.message, diff_text)
                         commit_data.append((commit, text))
                     except Exception as e:
                         error_console.print(

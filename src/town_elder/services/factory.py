@@ -6,6 +6,7 @@ from pathlib import Path
 from town_elder.config import get_config
 from town_elder.embeddings import Embedder
 from town_elder.git import DiffParser, GitRunner
+from town_elder.rust_adapter import get_diff_parser_factory
 from town_elder.storage import ZvecStore
 
 
@@ -51,8 +52,12 @@ class ServiceFactory:
         """Create a DiffParser instance.
 
         Returns:
-            A DiffParser for parsing git diffs.
+            A DiffParser for parsing git diffs. Uses Rust implementation if
+            TE_USE_RUST_CORE is enabled and the extension is available.
         """
+        rust_parser_factory = get_diff_parser_factory()
+        if rust_parser_factory is not None:
+            return rust_parser_factory()
         return DiffParser()
 
 
