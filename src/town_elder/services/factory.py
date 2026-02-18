@@ -5,6 +5,7 @@ from pathlib import Path
 
 from town_elder.config import get_config
 from town_elder.embeddings import Embedder
+from town_elder.embeddings.backend import get_embed_backend_from_config
 from town_elder.git import DiffParser, GitRunner
 from town_elder.rust_adapter import get_diff_parser_factory
 from town_elder.storage import ZvecStore
@@ -22,7 +23,19 @@ class ServiceFactory:
 
         Returns:
             An Embedder configured from the app config.
+
+        Raises:
+            Exception: If the requested backend is unavailable.
         """
+        # Determine which backend to use based on config
+        # This validates the config and raises errors if backend unavailable
+        # TODO: Use backend_type to instantiate Rust embedder when backend_type == EmbedBackendType.RUST
+        backend_type = get_embed_backend_from_config(self._config.embed_backend)
+        del backend_type  # noqa: F841  # Keep validation but defer actual backend switching
+
+        # For now, we always create the Python embedder regardless of backend_type.
+        # The backend_type determines whether Rust should be used when available.
+        # Future work: create Rust embedder when backend_type is RUST.
         return Embedder(
             model_name=self._config.embed_model,
             embed_dimension=self._config.embed_dimension,

@@ -1,11 +1,44 @@
 """Configuration management."""
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from town_elder.exceptions import ConfigError
+
+
+class EmbedBackend(str, Enum):
+    """Embedding backend selection options."""
+
+    AUTO = "auto"
+    PYTHON = "python"
+    RUST = "rust"
+
+
+VALID_EMBED_BACKEND_VALUES = frozenset({"auto", "python", "rust"})
+
+
+def _validate_embed_backend(value: str) -> str:
+    """Validate embed_backend configuration value.
+
+    Args:
+        value: The backend value to validate.
+
+    Returns:
+        The validated value (normalized to lowercase).
+
+    Raises:
+        ConfigError: If the value is not valid.
+    """
+    normalized = value.lower().strip()
+    if normalized not in VALID_EMBED_BACKEND_VALUES:
+        raise ConfigError(
+            f"Invalid embed_backend value: '{value}'. "
+            f"Valid values are: {', '.join(sorted(VALID_EMBED_BACKEND_VALUES))}"
+        )
+    return normalized
 
 
 def _get_default_data_dir(base_path: Path | None = None) -> Path:
@@ -52,12 +85,21 @@ class TownElderConfig(BaseSettings):
     # Embedding settings
     embed_model: str = "BAAI/bge-small-en-v1.5"
     embed_dimension: int = 384
+    embed_backend: str = "auto"
 
     # Search settings
     default_top_k: int = 5
 
     # Logging
     verbose: bool = False
+
+    @field_validator("embed_backend", mode="before")
+    @classmethod
+    def _validate_embed_backend(cls, v: str) -> str:
+        """Validate embed_backend configuration value."""
+        if v is None:
+            return "auto"
+        return _validate_embed_backend(str(v))
 
 
 @lru_cache
