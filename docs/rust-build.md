@@ -59,13 +59,13 @@ cargo build --bin te --manifest-path rust/Cargo.toml
 ### Running the CLI
 
 ```bash
-# Run the Rust CLI binary
-cargo run --manifest-path rust/Cargo.toml --bin te -- --help
+# Run the native Rust CLI binary
+cargo run --manifest-path rust/Cargo.toml --bin te-rs -- --help
 
 # Run with a subcommand
-cargo run --manifest-path rust/Cargo.toml --bin te -- health
-cargo run --manifest-path rust/Cargo.toml --bin te -- version
-cargo run --manifest-path rust/Cargo.toml --bin te -- placeholder
+cargo run --manifest-path rust/Cargo.toml --bin te-rs -- health
+cargo run --manifest-path rust/Cargo.toml --bin te-rs -- version
+cargo run --manifest-path rust/Cargo.toml --bin te-rs -- index files . --query "deprecated"
 ```
 
 ### Running Tests
