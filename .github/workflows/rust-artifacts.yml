@@ -1,0 +1,80 @@
+name: Rust Artifacts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  wheels:
+    name: Build te-core wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build wheel via maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --manifest-path rust/src/Cargo.toml --release --features python --out dist
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: te-core-wheel-${{ matrix.os }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  native-binary:
+    name: Build te-rs binary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build te-rs
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin te-rs
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          BIN_PATH="rust/target/release/te-rs"
+          if [ ! -f "$BIN_PATH" ]; then
+            echo "Binary not found: $BIN_PATH"
+            exit 1
+          fi
+
+          ARTIFACT_BASE="te-rs-${{ runner.os }}-${{ runner.arch }}"
+          cp "$BIN_PATH" "dist/$ARTIFACT_BASE"
+          tar -czf "dist/$ARTIFACT_BASE.tar.gz" -C dist "$ARTIFACT_BASE"
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: te-rs-${{ matrix.os }}
+          path: |
+            dist/te-rs-*.tar.gz
+          if-no-files-found: error

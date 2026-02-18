@@ -115,6 +115,21 @@ cd town-elder
 uv pip install -e .
 ```
 
+### Native Rust CLI (`te-rs`)
+
+Build the native binary from the same source tree:
+
+```bash
+cargo build --manifest-path rust/Cargo.toml --release --bin te-rs
+./rust/target/release/te-rs --help
+```
+
+Packaging and distribution details are documented in:
+
+- `docs/native-cli.md`
+- `docs/release.md`
+- `docs/distribution-homebrew.md`
+
 ## Running with uv or uvx
 
 This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
