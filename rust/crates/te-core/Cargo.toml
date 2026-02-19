@@ -13,6 +13,10 @@ crate-type = ["lib", "cdylib", "staticlib"]
 # PyO3 for Python bindings
 pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
 
+# FastEmbed for production embeddings (feature-gated)
+# Using version 5.x which has better feature support
+fastembed = { version = "5.0", optional = true }
+
 # CLI argument parsing
 clap = { version = "4.5", features = ["derive"] }
 
@@ -36,6 +40,7 @@ regex = "1.10"
 [features]
 default = []
 python = ["pyo3"]
+fastembed = ["dep:fastembed"]
 
 [build-dependencies]
 pyo3-build-config = { version = "0.22", features = ["resolve-config"] }

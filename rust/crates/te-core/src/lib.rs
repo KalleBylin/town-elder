@@ -1166,6 +1166,272 @@ impl Embedder for InMemoryEmbedder {
     }
 }
 
+// =============================================================================
+// FastEmbed Implementation
+// =============================================================================
+
+/// Known embedding models and their dimensions.
+/// These match the models supported by the Python fastembed implementation.
+pub const KNOWN_EMBED_MODELS: &[(&str, usize)] = &[
+    ("BAAI/bge-small-en-v1.5", 384),
+    ("BAAI/bge-base-en-v1.5", 768),
+    ("BAAI/bge-large-en-v1.5", 1024),
+];
+
+/// Default embedding model.
+pub const DEFAULT_EMBED_MODEL: &str = "BAAI/bge-small-en-v1.5";
+
+/// Get the expected dimensions for a model name.
+///
+/// Returns Some(dimensions) if the model is known, None otherwise.
+pub fn get_model_dimensions(model_name: &str) -> Option<usize> {
+    KNOWN_EMBED_MODELS
+        .iter()
+        .find(|(name, _)| *name == model_name)
+        .map(|(_, dims)| *dims)
+}
+
+/// Validate that a model name is supported.
+///
+/// Returns Ok(()) if valid, Err(BackendError::ConfigError) otherwise.
+pub fn validate_model_name(model_name: &str) -> Result<(), BackendError> {
+    if get_model_dimensions(model_name).is_some() {
+        Ok(())
+    } else {
+        let known_models: Vec<&str> = KNOWN_EMBED_MODELS.iter().map(|(name, _)| *name).collect();
+        Err(BackendError::ConfigError(format!(
+            "Unsupported model: '{}'. Supported models are: {}",
+            model_name,
+            known_models.join(", ")
+        )))
+    }
+}
+
+#[cfg(feature = "fastembed")]
+mod fastembed_impl {
+    use super::*;
+    use std::str::FromStr;
+    use std::sync::Mutex;
+
+    /// FastEmbed embedder implementation.
+    ///
+    /// This provides production-quality embeddings using the Rust fastembed crate.
+    pub struct FastEmbedder {
+        /// The underlying fastembed model runtime.
+        model: Mutex<fastembed::TextEmbedding>,
+        /// Expected dimensions for this model.
+        dimensions: usize,
+    }
+
+    impl FastEmbedder {
+        /// Create a new FastEmbedder with the specified model.
+        ///
+        /// # Arguments
+        /// * `model_name` - The model identifier (e.g., "BAAI/bge-small-en-v1.5")
+        ///
+        /// # Errors
+        /// Returns ConfigError if the model is not supported.
+        pub fn new(model_name: &str) -> Result<Self, BackendError> {
+            // Validate model is known
+            let dimensions = get_model_dimensions(model_name)
+                .ok_or_else(|| {
+                    let known_models: Vec<&str> =
+                        KNOWN_EMBED_MODELS.iter().map(|(n, _)| *n).collect();
+                    BackendError::ConfigError(format!(
+                        "Unsupported model: '{}'. Supported models are: {}",
+                        model_name,
+                        known_models.join(", ")
+                    ))
+                })?;
+
+            // Parse and initialize the fastembed model runtime.
+            let parsed_model = fastembed::EmbeddingModel::from_str(model_name).map_err(|e| {
+                BackendError::ConfigError(format!("Unsupported fastembed model '{}': {}", model_name, e))
+            })?;
+            let model = fastembed::TextEmbedding::try_new(fastembed::TextInitOptions::new(parsed_model))
+                .map_err(|e| {
+                    BackendError::EmbeddingError(format!(
+                        "Failed to initialize model '{}': {}",
+                        model_name, e
+                    ))
+                })?;
+
+            Ok(Self {
+                model: Mutex::new(model),
+                dimensions,
+            })
+        }
+
+        /// Create a new FastEmbedder with explicit dimensions validation.
+        ///
+        /// If embed_dimension is provided, validates it matches the model's expected dimensions.
+        pub fn new_with_validation(
+            model_name: &str,
+            embed_dimension: Option<usize>,
+        ) -> Result<Self, BackendError> {
+            let embedder = Self::new(model_name)?;
+
+            // Validate dimension if provided
+            if let Some(expected_dim) = embed_dimension {
+                if expected_dim != embedder.dimensions {
+                    return Err(BackendError::ConfigError(format!(
+                        "Dimension mismatch: model '{}' produces {}d vectors, but {}d was requested",
+                        model_name,
+                        embedder.dimensions,
+                        expected_dim
+                    )));
+                }
+            }
+
+            Ok(embedder)
+        }
+    }
+
+    impl Embedder for FastEmbedder {
+        fn embed(&self, texts: &[String]) -> Result<Vec<Embedding>, BackendError> {
+            if texts.is_empty() {
+                return Ok(vec![]);
+            }
+
+            // fastembed requires mutable access for inference, so guard with a mutex.
+            let mut model = self.model.lock().map_err(|_| {
+                BackendError::EmbeddingError("Failed to acquire fastembed model lock".to_string())
+            })?;
+
+            // The fastembed crate returns Vec<Vec<f32>> preserving input order.
+            let embeddings = model
+                .embed(texts, None)
+                .map_err(|e| BackendError::EmbeddingError(format!("Embedding generation failed: {}", e)))?;
+
+            // Convert to our Embedding type, validating dimensions
+            let result: Result<Vec<Embedding>, BackendError> = embeddings
+                .into_iter()
+                .map(|values| {
+                    // Validate shape consistency
+                    if values.len() != self.dimensions {
+                        return Err(BackendError::EmbeddingError(format!(
+                            "Dimension mismatch: expected {}d but got {}d",
+                            self.dimensions,
+                            values.len()
+                        )));
+                    }
+                    Ok(Embedding::new(values, None))
+                })
+                .collect();
+
+            result
+        }
+
+        fn dimensions(&self) -> usize {
+            self.dimensions
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_fastembedder_known_models() {
+            // Test all known models can be initialized
+            for (model_name, expected_dims) in KNOWN_EMBED_MODELS {
+                let embedder = FastEmbedder::new(model_name);
+                // This will fail if the model can't be loaded (e.g., no cache)
+                // but should not fail due to unknown model
+                if let Ok(emb) = embedder {
+                    assert_eq!(emb.dimensions(), *expected_dims);
+                }
+            }
+        }
+
+        #[test]
+        fn test_fastembedder_unsupported_model() {
+            let result = FastEmbedder::new("unknown/model");
+            assert!(result.is_err());
+            match result {
+                Err(BackendError::ConfigError(msg)) => {
+                    assert!(msg.contains("Unsupported model"));
+                }
+                _ => panic!("Expected ConfigError"),
+            }
+        }
+
+        #[test]
+        fn test_fastembedder_dimension_validation() {
+            let result = FastEmbedder::new_with_validation(
+                "BAAI/bge-small-en-v1.5",
+                Some(384),
+            );
+            // Should succeed with correct dimension
+            if let Ok(emb) = result {
+                assert_eq!(emb.dimensions(), 384);
+            }
+
+            // Should fail with wrong dimension
+            let result_wrong = FastEmbedder::new_with_validation(
+                "BAAI/bge-small-en-v1.5",
+                Some(768),
+            );
+            assert!(result_wrong.is_err());
+        }
+
+        #[test]
+        fn test_fastembedder_empty_input() {
+            if let Ok(embedder) = FastEmbedder::new(DEFAULT_EMBED_MODEL) {
+                let result = embedder.embed(&[]);
+                assert!(result.is_ok());
+                assert!(result.unwrap().is_empty());
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "fastembed"))]
+mod fastembed_impl {
+    use super::*;
+
+    /// Stub FastEmbedder when fastembed feature is not enabled.
+    ///
+    /// This allows the codebase to compile without the fastembed dependency,
+    /// but any attempt to use it will return an error.
+    pub struct FastEmbedder;
+
+    impl FastEmbedder {
+        /// Create a new FastEmbedder (always fails without fastembed feature).
+        pub fn new(_model_name: &str) -> Result<Self, BackendError> {
+            Err(BackendError::ConfigError(
+                "FastEmbed support not enabled. Compile with --features fastembed".to_string(),
+            ))
+        }
+
+        /// Create with dimension validation (always fails without fastembed feature).
+        pub fn new_with_validation(
+            model_name: &str,
+            embed_dimension: Option<usize>,
+        ) -> Result<Self, BackendError> {
+            let _ = (model_name, embed_dimension);
+            Err(BackendError::ConfigError(
+                "FastEmbed support not enabled. Compile with --features fastembed".to_string(),
+            ))
+        }
+    }
+
+    impl Embedder for FastEmbedder {
+        fn embed(&self, _texts: &[String]) -> Result<Vec<Embedding>, BackendError> {
+            Err(BackendError::ConfigError(
+                "FastEmbed support not enabled. Compile with --features fastembed".to_string(),
+            ))
+        }
+
+        fn dimensions(&self) -> usize {
+            0
+        }
+    }
+}
+
+// Re-export for external use
+pub use fastembed_impl::FastEmbedder;
+
 /// In-memory vector store implementation.
 pub struct InMemoryVectorStore {
     documents: RwLock<HashMap<String, Document>>,
