@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
@@ -31,6 +32,28 @@ class EmbeddingBackendUnavailableError(Exception):
         super().__init__(self.message)
 
 
+@dataclass
+class EmbedderConfig:
+    """Configuration for Embedder.
+
+    Attributes:
+        model_name: Name of the embedding model to use.
+        embed_dimension: Expected embedding dimension from config.
+                         If provided, validates against model dimension.
+        allow_fallback: If True, allow returning zero vectors when model unavailable.
+        batch_size: Default embedding batch size for backend calls.
+        parallel: Default embedding parallelism for backend calls.
+        backend: Backend to use ("auto", "python", or "rust").
+    """
+
+    model_name: str = "BAAI/bge-small-en-v1.5"
+    embed_dimension: int | None = None
+    allow_fallback: bool = False
+    batch_size: int = 256
+    parallel: int | None = None
+    backend: str = "auto"
+
+
 class Embedder:
     """Wrapper around embedding backends (fastembed or Rust)."""
 
@@ -45,37 +68,42 @@ class Embedder:
         "BAAI/bge-large-en-v1.5": 1024,
     }
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
-        model_name: str = DEFAULT_MODEL,
-        embed_dimension: int | None = None,
-        allow_fallback: bool = False,
-        batch_size: int = DEFAULT_BATCH_SIZE,
-        parallel: int | None = None,
-        backend: str = "auto",
+        config: EmbedderConfig | None = None,
+        **kwargs: object,
     ):
         """Initialize the Embedder.
 
         Args:
-            model_name: Name of the embedding model to use.
-            embed_dimension: Expected embedding dimension from config.
-                             If provided, validates against model dimension.
-            allow_fallback: If True, allow returning zero vectors when model unavailable.
-            batch_size: Default embedding batch size for backend calls.
-            parallel: Default embedding parallelism for backend calls.
-            backend: Backend to use ("auto", "python", or "rust").
+            config: EmbedderConfig object with all configuration options.
+            **kwargs: Alternative to config - individual parameters.
+                      If config is provided, kwargs are ignored.
         """
-        self.model_name = model_name
-        self._embed_dimension = embed_dimension
-        self._allow_fallback = allow_fallback
-        self.batch_size = max(batch_size, 1)
-        self.parallel = parallel if parallel is not None else (os.cpu_count() or 1)
-        self._backend = backend.lower() if backend else "auto"
+        # Use config if provided, otherwise build from kwargs
+        if config is not None:
+            self.model_name = config.model_name
+            self._embed_dimension = config.embed_dimension
+            self._allow_fallback = config.allow_fallback
+            self.batch_size = max(config.batch_size, 1)
+            self.parallel = config.parallel if config.parallel is not None else (os.cpu_count() or 1)
+            self._backend = config.backend.lower() if config.backend else "auto"
+        else:
+            # Extract individual parameters from kwargs with defaults
+            self.model_name = str(kwargs.get("model_name", self.DEFAULT_MODEL))
+            self._embed_dimension = kwargs.get("embed_dimension")
+            self._allow_fallback = bool(kwargs.get("allow_fallback", False))
+            batch_size = int(kwargs.get("batch_size", self.DEFAULT_BATCH_SIZE))
+            self.batch_size = max(batch_size, 1)
+            parallel = kwargs.get("parallel")
+            self.parallel = parallel if parallel is not None else (os.cpu_count() or 1)
+            backend = kwargs.get("backend", "auto")
+            self._backend = backend.lower() if backend else "auto"
 
         # Validate backend value
         if self._backend not in {"auto", "python", "rust"}:
             raise ValueError(
-                f"Invalid backend: '{backend}'. "
+                f"Invalid backend: '{self._backend}'. "
                 f"Must be one of: auto, python, rust"
             )
 
@@ -84,12 +112,12 @@ class Embedder:
         self._backend_impl: object | None = None
 
         # Validate dimension at initialization if provided
-        if embed_dimension is not None:
-            expected_dim = self.MODEL_DIMENSIONS.get(model_name)
-            if expected_dim is not None and embed_dimension != expected_dim:
+        if self._embed_dimension is not None:
+            expected_dim = self.MODEL_DIMENSIONS.get(self.model_name)
+            if expected_dim is not None and self._embed_dimension != expected_dim:
                 raise ValueError(
-                    f"Config embed_dimension ({embed_dimension}) does not match "
-                    f"expected dimension for model {model_name} ({expected_dim}). "
+                    f"Config embed_dimension ({self._embed_dimension}) does not match "
+                    f"expected dimension for model {self.model_name} ({expected_dim}). "
                     f"Either update embed_dimension in config to {expected_dim} "
                     f"or use a different model."
                 )

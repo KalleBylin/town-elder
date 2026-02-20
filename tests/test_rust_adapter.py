@@ -484,6 +484,46 @@ class TestRustTextEmbedder:
             with pytest.raises(rust_adapter.RustExtensionNotAvailableError):
                 rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
 
+    def test_invalid_model_raises_valueerror(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should raise ValueError for invalid model, not RuntimeError."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_module = mock.MagicMock()
+        # Simulate Rust raising ValueError for invalid model
+        mock_module.PyTextEmbedder.side_effect = ValueError("Model 'invalid-model' not supported")
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            with pytest.raises(ValueError) as exc_info:
+                rust_adapter.RustTextEmbedder("invalid-model")
+            assert "not supported" in str(exc_info.value)
+            # Should NOT be wrapped in RuntimeError
+            assert not isinstance(exc_info.value, RuntimeError)
+
+    def test_runtime_error_not_masked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should wrap true runtime errors in RuntimeError, not ValueError."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_module = mock.MagicMock()
+        # Simulate a true runtime error (e.g., memory allocation failure)
+        mock_module.PyTextEmbedder.side_effect = RuntimeError("Out of memory")
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            with pytest.raises(RuntimeError) as exc_info:
+                rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
+            assert "Out of memory" in str(exc_info.value)
+
     def test_initializes_with_valid_model(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

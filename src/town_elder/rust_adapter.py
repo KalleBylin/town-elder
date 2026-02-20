@@ -461,13 +461,17 @@ class RustTextEmbedder:
 
         Raises:
             RustExtensionNotAvailableError: If Rust core is not available.
-            ValueError: If the model is not supported.
-            RuntimeError: If the embedder fails to initialize.
+            ValueError: If the model is not supported or invalid config.
+            RuntimeError: If the embedder fails to initialize at runtime.
         """
         module = get_te_core_or_raise()
         try:
             self._embedder = module.PyTextEmbedder(model, cache_dir)
+        except ValueError:
+            # Re-raise ValueError for invalid model/config errors - don't wrap
+            raise
         except Exception as e:
+            # Only wrap true runtime init failures, not config errors
             raise RuntimeError(f"Failed to initialize Rust embedder: {e}") from e
 
     def embed(self, texts: list[str]) -> list[list[float]]:

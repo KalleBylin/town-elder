@@ -201,3 +201,94 @@ class TestEmbedBackendEnum:
         """Test that all expected enum members exist."""
         expected_member_count = 3
         assert len(EmbedBackend) == expected_member_count
+
+
+class TestFallbackDiagnostic:
+    """Tests for backend fallback diagnostic emission."""
+
+    def test_fallback_diagnostic_emitted_once(
+        self, caplog
+    ) -> None:
+        """Should emit fallback diagnostic once when auto falls back to Python."""
+        # Reset the module-level flag
+        from town_elder.embeddings import backend as embed_backend
+
+        embed_backend.reset_fallback_diagnostic()
+
+        # First call should emit the diagnostic
+        with caplog.at_level("INFO"):
+            result = embed_backend.select_embed_backend(
+                "auto", rust_available=False, python_available=True
+            )
+        assert result == embed_backend.EmbedBackendType.PYTHON
+
+        # Check that the diagnostic was logged
+        assert any(
+            "auto-selected Python (fastembed)" in record.message
+            for record in caplog.records
+        )
+
+    def test_fallback_diagnostic_not_emitted_for_rust(
+        self, caplog
+    ) -> None:
+        """Should not emit fallback diagnostic when Rust is available."""
+        from town_elder.embeddings import backend as embed_backend
+
+        embed_backend.reset_fallback_diagnostic()
+
+        result = embed_backend.select_embed_backend(
+            "auto", rust_available=True, python_available=True
+        )
+        assert result == embed_backend.EmbedBackendType.RUST
+
+        # Should NOT log the fallback diagnostic
+        assert not any(
+            "auto-selected Python (fastembed)" in record.message
+            for record in caplog.records
+        )
+
+    def test_fallback_diagnostic_not_emitted_for_explicit_python(
+        self, caplog
+    ) -> None:
+        """Should not emit fallback diagnostic for explicit python backend."""
+        from town_elder.embeddings import backend as embed_backend
+
+        embed_backend.reset_fallback_diagnostic()
+
+        result = embed_backend.select_embed_backend(
+            "python", python_available=True
+        )
+        assert result == embed_backend.EmbedBackendType.PYTHON
+
+        # Should NOT log the fallback diagnostic (it's explicit, not fallback)
+        assert not any(
+            "auto-selected Python (fastembed)" in record.message
+            for record in caplog.records
+        )
+
+    def test_fallback_diagnostic_only_emits_once_per_process(
+        self, caplog
+    ) -> None:
+        """Should only emit fallback diagnostic once even with multiple calls."""
+        from town_elder.embeddings import backend as embed_backend
+
+        embed_backend.reset_fallback_diagnostic()
+
+        # First call - should emit
+        embed_backend.select_embed_backend(
+            "auto", rust_available=False, python_available=True
+        )
+
+        # Reset caplog to count only the second call
+        caplog.clear()
+
+        # Second call - should NOT emit again
+        embed_backend.select_embed_backend(
+            "auto", rust_available=False, python_available=True
+        )
+
+        # Should NOT log the fallback diagnostic on second call
+        assert not any(
+            "auto-selected Python (fastembed)" in record.message
+            for record in caplog.records
+        )

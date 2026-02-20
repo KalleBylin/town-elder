@@ -10,11 +10,17 @@ Selection semantics:
 """
 from __future__ import annotations
 
+import logging
 from enum import Enum
 
 from town_elder.config import EmbedBackend
 from town_elder.exceptions import ConfigError
 from town_elder.rust_adapter import get_te_core
+
+logger = logging.getLogger(__name__)
+
+# Module-level flag to ensure fallback diagnostic is emitted only once
+_fallback_diagnostic_emitted: bool = False
 
 
 class EmbedBackendType(str, Enum):
@@ -57,6 +63,30 @@ def is_python_embed_available() -> bool:
         Always returns True (actual availability checked at usage time).
     """
     return True
+
+
+def _emit_fallback_diagnostic() -> None:
+    """Emit a one-time diagnostic when auto backend falls back from Rust to Python.
+
+    This function is called once per process when backend=auto but Rust is unavailable.
+    It helps users understand why their preferred backend wasn't used.
+    """
+    global _fallback_diagnostic_emitted
+    if _fallback_diagnostic_emitted:
+        return
+
+    _fallback_diagnostic_emitted = True
+    logger.info(
+        "Embedding backend: auto-selected Python (fastembed) because Rust backend "
+        "is not available. To enable Rust: set TE_USE_RUST_CORE=1 and build the "
+        "extension with 'cd rust && maturin develop'"
+    )
+
+
+def reset_fallback_diagnostic() -> None:
+    """Reset the fallback diagnostic flag (for testing purposes)."""
+    global _fallback_diagnostic_emitted
+    _fallback_diagnostic_emitted = False
 
 
 def select_embed_backend(
@@ -123,6 +153,8 @@ def select_embed_backend(
     if config_value == EmbedBackend.AUTO.value:
         if rust_available:
             return EmbedBackendType.RUST
+        # Emit one-time diagnostic when falling back from Rust to Python
+        _emit_fallback_diagnostic()
         return EmbedBackendType.PYTHON
 
     # Should never reach here due to validation above
