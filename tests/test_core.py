@@ -159,7 +159,7 @@ class TestEmbedder:
         """Embed should return numpy arrays compatible with ZvecStore."""
         embedder = Embedder(backend="python")
         # Mock the backend implementation
-        embedder._backend_impl = type("MockModel", (), {  # noqa: ARG005
+        embedder._backend_impl = type("MockModel", (), {
             "embed": lambda _self, texts, **_kwargs: [
                 np.zeros(_DEFAULT_EMBED_DIMENSION, dtype=np.float32) for _ in texts
             ]
