@@ -7,9 +7,10 @@ from town_elder.embeddings.backend import (
     is_rust_embed_available,
     select_embed_backend,
 )
-from town_elder.embeddings.embedder import Embedder
+from town_elder.embeddings.embedder import EmbedBackend, Embedder
 
 __all__ = [
+    "EmbedBackend",
     "EmbedBackendUnavailableError",
     "EmbedBackendType",
     "Embedder",

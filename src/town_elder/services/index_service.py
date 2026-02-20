@@ -21,7 +21,11 @@ class IndexService:
     ):
         config = get_config()
         self.store = store or ZvecStore(config.data_dir / "vectors", dimension=config.embed_dimension)
-        self.embedder = embedder or Embedder(model_name=config.embed_model, embed_dimension=config.embed_dimension)
+        self.embedder = embedder or Embedder(
+            model_name=config.embed_model,
+            embed_dimension=config.embed_dimension,
+            backend=config.embed_backend,
+        )
 
     def index_text(self, text: str, doc_id: str, metadata: dict[str, Any] | None = None) -> str:
         """Index a single text document."""

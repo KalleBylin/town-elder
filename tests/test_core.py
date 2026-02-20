@@ -102,7 +102,8 @@ class TestEmbedder:
             lambda: expected_parallel,
         )
 
-        embedder = Embedder()
+        # Force python backend to avoid rust adapter import
+        embedder = Embedder(backend="python")
 
         class FakeModel:
             def __init__(self):
@@ -114,12 +115,60 @@ class TestEmbedder:
                     yield np.zeros(_DEFAULT_EMBED_DIMENSION, dtype=np.float32)
 
         fake_model = FakeModel()
-        embedder._model = fake_model
+        embedder._backend_impl = fake_model
 
         vectors = list(embedder.embed(["a", "b"]))
 
         assert len(vectors) == _EMBED_BATCH_COUNT
         assert fake_model.calls == [(Embedder.DEFAULT_BATCH_SIZE, expected_parallel)]
+
+    def test_embedder_backend_auto_uses_python_when_rust_unavailable(self):
+        """Auto backend should use Python when Rust is not available."""
+        embedder = Embedder(backend="auto")
+        assert embedder.backend_type == "python"
+
+    def test_embedder_backend_python_uses_python(self):
+        """Explicit Python backend should work."""
+        embedder = Embedder(backend="python")
+        assert embedder.backend_type == "python"
+
+    def test_embedder_backend_invalid_raises(self):
+        """Invalid backend should raise ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            Embedder(backend="invalid")
+        assert "Invalid backend" in str(exc_info.value)
+
+    def test_embedder_backend_property_resolves_lazily(self):
+        """Backend type should resolve lazily on first access."""
+        embedder = Embedder(backend="python")
+        # Backend should not be resolved yet
+        assert embedder._backend_type is None
+        # Accessing backend_type should resolve it
+        _ = embedder.backend_type
+        assert embedder._backend_type is not None
+
+    def test_embedder_rust_backend_raises_when_unavailable(self):
+        """Rust backend should raise when not available and allow_fallback=False."""
+        embedder = Embedder(backend="rust", allow_fallback=False)
+        with pytest.raises(Exception) as exc_info:
+            list(embedder.embed(["test"]))
+        # Should indicate Rust backend issue
+        assert "Rust" in str(exc_info.value) or "rust" in str(exc_info.value).lower()
+
+    def test_embedder_embed_returns_numpy_arrays(self):
+        """Embed should return numpy arrays compatible with ZvecStore."""
+        embedder = Embedder(backend="python")
+        # Mock the backend implementation
+        embedder._backend_impl = type("MockModel", (), {  # noqa: ARG005
+            "embed": lambda _self, texts, **_kwargs: [
+                np.zeros(_DEFAULT_EMBED_DIMENSION, dtype=np.float32) for _ in texts
+            ]
+        })()
+        vectors = list(embedder.embed(["test"]))
+        assert len(vectors) == 1
+        assert isinstance(vectors[0], np.ndarray)
+        assert vectors[0].dtype == np.float32
+        assert vectors[0].shape == (_DEFAULT_EMBED_DIMENSION,)
 
 
 class TestVectorStore:
