@@ -83,9 +83,15 @@ print('Test 2: Listing supported embedding models...')
 models = town_elder._te_core.PyTextEmbedder.list_supported_models()
 print(f'  Found {len(models)} models: {models[:2]}...')
 
-# Test 3: Create embedder
-print('Test 3: Creating embedder with default model...')
-embedder = town_elder._te_core.PyTextEmbedder('BAAI/bge-small-en-v1.5')
+# Dynamically select a valid model (first entry)
+model_id = models[0][0] if models else None
+if not model_id:
+    raise RuntimeError('No embedding models available')
+print(f'  Using model: {model_id}')
+
+# Test 3: Create embedder with dynamically selected model
+print('Test 3: Creating embedder with dynamic model...')
+embedder = town_elder._te_core.PyTextEmbedder(model_id)
 print(f'  Model: {embedder.get_model_name()}, Dimension: {embedder.dimension()}')
 
 # Test 4: Embed single text

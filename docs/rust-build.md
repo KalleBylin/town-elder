@@ -151,18 +151,26 @@ With embedding support enabled:
 ```python
 import town_elder._te_core as te_core
 
-# List available models
+# List available models (returns list of tuples: (model_id, dimension))
 models = te_core.PyTextEmbedder.list_supported_models()
-print(f"Available models: {models}")  # [("BAAI/bge-small-en-v1.5", 384), ...]
+print(f"Available models: {models}")
 
-# Create an embedder
-embedder = te_core.PyTextEmbedder("BAAI/bge-small-en-v1.5")
-print(f"Dimension: {embedder.dimension()}")  # 384
+# Select first available model (recommended - avoids hard-coded model names)
+model_id = models[0][0] if models else None
+if not model_id:
+    raise RuntimeError("No embedding models available")
+
+# Create an embedder with the selected model
+embedder = te_core.PyTextEmbedder(model_id)
+print(f"Model: {embedder.get_model_name()}, Dimension: {embedder.dimension()}")
 
 # Embed text
 embedding = embedder.embed_single("Hello, world!")
 print(f"Embedding: {embedding[:5]}...")  # [0.1, 0.05, -0.02, ...]
 ```
+
+> **Note**: Model names returned by `list_supported_models()` are guaranteed to be valid at runtime.
+> Avoid hard-coding model IDs—always use the dynamically returned list model to ensure compatibility.
 
 ## Development Notes
 
