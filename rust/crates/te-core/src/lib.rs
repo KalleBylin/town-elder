@@ -1172,33 +1172,67 @@ impl Embedder for InMemoryEmbedder {
 
 /// Known embedding models and their dimensions.
 /// These match the models supported by the Rust fastembed 5.x implementation.
+/// The keys use Xenova/* naming as that's what the fastembed crate expects.
 pub const KNOWN_EMBED_MODELS: &[(&str, usize)] = &[
     ("Xenova/bge-small-en-v1.5", 384),
     ("Xenova/bge-base-en-v1.5", 768),
     ("Xenova/bge-large-en-v1.5", 1024),
 ];
 
-/// Default embedding model.
+/// Alias mapping from BAAI/* to Xenova/* model identifiers.
+/// BAAI/* is the naming convention used in Python config and HuggingFace hub,
+/// but fastembed internally expects Xenova/* naming.
+pub const MODEL_ALIASES: &[(&str, &str)] = &[
+    ("BAAI/bge-small-en-v1.5", "Xenova/bge-small-en-v1.5"),
+    ("BAAI/bge-base-en-v1.5", "Xenova/bge-base-en-v1.5"),
+    ("BAAI/bge-large-en-v1.5", "Xenova/bge-large-en-v1.5"),
+];
+
+/// Normalize a model name to the canonical form expected by fastembed.
+///
+/// BAAI/* identifiers are mapped to Xenova/* identifiers since that's what
+/// the fastembed crate expects internally.
+///
+/// Returns the normalized model name.
+pub fn normalize_model_name(model_name: &str) -> String {
+    // Check if this is a BAAI/* model that needs aliasing
+    for (alias, canonical) in MODEL_ALIASES {
+        if model_name == *alias {
+            return canonical.to_string();
+        }
+    }
+    // Return original if no alias found
+    model_name.to_string()
+}
+
+/// Default embedding model (using Xenova/* naming for fastembed).
 pub const DEFAULT_EMBED_MODEL: &str = "Xenova/bge-small-en-v1.5";
 
 /// Get the expected dimensions for a model name.
 ///
+/// Accepts both BAAI/* and Xenova/* naming conventions.
 /// Returns Some(dimensions) if the model is known, None otherwise.
 pub fn get_model_dimensions(model_name: &str) -> Option<usize> {
+    let normalized = normalize_model_name(model_name);
     KNOWN_EMBED_MODELS
         .iter()
-        .find(|(name, _)| *name == model_name)
+        .find(|(name, _)| *name == normalized)
         .map(|(_, dims)| *dims)
 }
 
 /// Validate that a model name is supported.
 ///
+/// Accepts both BAAI/* and Xenova/* naming conventions.
 /// Returns Ok(()) if valid, Err(BackendError::ConfigError) otherwise.
 pub fn validate_model_name(model_name: &str) -> Result<(), BackendError> {
     if get_model_dimensions(model_name).is_some() {
         Ok(())
     } else {
-        let known_models: Vec<&str> = KNOWN_EMBED_MODELS.iter().map(|(name, _)| *name).collect();
+        // List both BAAI/* and Xenova/* as supported for user clarity
+        let known_models: Vec<String> = MODEL_ALIASES
+            .iter()
+            .map(|(alias, _)| alias.to_string())
+            .collect();
         Err(BackendError::ConfigError(format!(
             "Unsupported model: '{}'. Supported models are: {}",
             model_name,
@@ -1227,16 +1261,19 @@ mod fastembed_impl {
         /// Create a new FastEmbedder with the specified model.
         ///
         /// # Arguments
-        /// * `model_name` - The model identifier (e.g., "BAAI/bge-small-en-v1.5")
+        /// * `model_name` - The model identifier (e.g., "BAAI/bge-small-en-v1.5" or "Xenova/bge-small-en-v1.5")
         ///
         /// # Errors
         /// Returns ConfigError if the model is not supported.
         pub fn new(model_name: &str) -> Result<Self, BackendError> {
-            // Validate model is known
+            // Normalize model name (BAAI/* -> Xenova/*) for fastembed compatibility
+            let normalized_name = normalize_model_name(model_name);
+
+            // Validate model is known (get_model_dimensions now handles normalization internally)
             let dimensions = get_model_dimensions(model_name)
                 .ok_or_else(|| {
-                    let known_models: Vec<&str> =
-                        KNOWN_EMBED_MODELS.iter().map(|(n, _)| *n).collect();
+                    let known_models: Vec<String> =
+                        MODEL_ALIASES.iter().map(|(n, _)| n.to_string()).collect();
                     BackendError::ConfigError(format!(
                         "Unsupported model: '{}'. Supported models are: {}",
                         model_name,
@@ -1244,15 +1281,16 @@ mod fastembed_impl {
                     ))
                 })?;
 
-            // Parse and initialize the fastembed model runtime.
-            let parsed_model = fastembed::EmbeddingModel::from_str(model_name).map_err(|e| {
-                BackendError::ConfigError(format!("Unsupported fastembed model '{}': {}", model_name, e))
+            // Parse and initialize the fastembed model runtime using normalized name.
+            // fastembed expects Xenova/* naming internally.
+            let parsed_model = fastembed::EmbeddingModel::from_str(&normalized_name).map_err(|e| {
+                BackendError::ConfigError(format!("Unsupported fastembed model '{}': {}", normalized_name, e))
             })?;
             let model = fastembed::TextEmbedding::try_new(fastembed::TextInitOptions::new(parsed_model))
                 .map_err(|e| {
                     BackendError::EmbeddingError(format!(
                         "Failed to initialize model '{}': {}",
-                        model_name, e
+                        normalized_name, e
                     ))
                 })?;
 

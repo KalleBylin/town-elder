@@ -548,12 +548,13 @@ impl PyTextEmbedder {
     /// Get list of supported model names.
     ///
     /// Returns:
-    ///     List of supported model identifiers
+    ///     List of supported model identifiers (using BAAI/* naming for Python config compatibility)
     #[staticmethod]
     fn list_supported_models() -> Vec<(String, usize)> {
-        te_core::KNOWN_EMBED_MODELS
+        // Return BAAI/* naming for Python config compatibility
+        te_core::MODEL_ALIASES
             .iter()
-            .map(|(name, dims)| (name.to_string(), *dims))
+            .map(|(alias, _)| (alias.to_string(), te_core::get_model_dimensions(alias).unwrap_or(0)))
             .collect()
     }
 }

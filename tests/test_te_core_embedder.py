@@ -19,17 +19,54 @@ class TestPyTextEmbedder:
         """Test that supported models are listed correctly."""
         models = _te_core.PyTextEmbedder.list_supported_models()
         assert len(models) == NUM_MODELS
-        # Check model format
+        # Check model format - should return BAAI/* naming for Python config compatibility
         for model_name, dimension in models:
             assert isinstance(model_name, str)
             assert isinstance(dimension, int)
             assert dimension > 0
+            # Verify BAAI/* naming is returned
+            assert model_name.startswith("BAAI/")
+
+    def test_list_supported_models_has_expected_models(self):
+        """Test that list_supported_models returns the expected BAAI models."""
+        models = _te_core.PyTextEmbedder.list_supported_models()
+        model_names = [m[0] for m in models]
+        assert "BAAI/bge-small-en-v1.5" in model_names
+        assert "BAAI/bge-base-en-v1.5" in model_names
+        assert "BAAI/bge-large-en-v1.5" in model_names
 
     def test_create_embedder_default_model(self):
         """Test creating embedder with default model."""
         embedder = _te_core.PyTextEmbedder("Xenova/bge-small-en-v1.5")
         assert embedder.get_model_name() == "Xenova/bge-small-en-v1.5"
         assert embedder.dimension() == DIM_SMALL
+
+    def test_create_embedder_with_baai_model(self):
+        """Test creating embedder with BAAI/* model identifier (Python config default)."""
+        embedder = _te_core.PyTextEmbedder("BAAI/bge-small-en-v1.5")
+        # The model name should be preserved as provided
+        assert embedder.get_model_name() == "BAAI/bge-small-en-v1.5"
+        assert embedder.dimension() == DIM_SMALL
+
+    def test_create_embedder_with_xenova_model(self):
+        """Test creating embedder with Xenova/* model identifier."""
+        embedder = _te_core.PyTextEmbedder("Xenova/bge-small-en-v1.5")
+        assert embedder.get_model_name() == "Xenova/bge-small-en-v1.5"
+        assert embedder.dimension() == DIM_SMALL
+
+    def test_embedder_with_baai_different_sizes(self):
+        """Test creating embedders with different BAAI/* model sizes."""
+        # Small model
+        embedder_small = _te_core.PyTextEmbedder("BAAI/bge-small-en-v1.5")
+        assert embedder_small.dimension() == DIM_SMALL
+
+        # Base model
+        embedder_base = _te_core.PyTextEmbedder("BAAI/bge-base-en-v1.5")
+        assert embedder_base.dimension() == DIM_BASE
+
+        # Large model
+        embedder_large = _te_core.PyTextEmbedder("BAAI/bge-large-en-v1.5")
+        assert embedder_large.dimension() == DIM_LARGE
 
     def test_embed_single_returns_vector(self):
         """Test that embed_single returns a vector of correct dimension."""
@@ -107,5 +144,5 @@ class TestPyTextEmbedderIntegration:
         error_msg = str(exc_info.value)
         # Should mention the invalid model
         assert "invalid-model" in error_msg
-        # Should list supported models
-        assert "Xenova/bge-small-en-v1.5" in error_msg
+        # Should list supported models (now returns BAAI/* naming)
+        assert "BAAI/bge-small-en-v1.5" in error_msg
