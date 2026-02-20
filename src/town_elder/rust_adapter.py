@@ -438,3 +438,131 @@ def truncate_diff(diff: str, max_size: int) -> tuple[str, bool]:
     if len(diff.encode()) > max_size:
         return diff[:max_size] + f"\n\n[truncated - exceeded {max_size} byte limit]", True
     return diff, False
+
+
+# =============================================================================
+# Text Embedding Adapter
+# =============================================================================
+
+
+class RustTextEmbedder:
+    """Rust-backed text embedder that wraps PyTextEmbedder.
+
+    This class provides the same interface for text embedding but uses
+    the Rust fastembed implementation for generating embeddings.
+    """
+
+    def __init__(self, model: str, cache_dir: str | None = None):
+        """Initialize the Rust text embedder.
+
+        Args:
+            model: The model identifier (e.g., "BAAI/bge-small-en-v1.5")
+            cache_dir: Optional directory for caching model files
+
+        Raises:
+            RustExtensionNotAvailableError: If Rust core is not available.
+            ValueError: If the model is not supported.
+            RuntimeError: If the embedder fails to initialize.
+        """
+        module = get_te_core_or_raise()
+        try:
+            self._embedder = module.PyTextEmbedder(model, cache_dir)
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize Rust embedder: {e}") from e
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings for a list of texts.
+
+        Args:
+            texts: List of strings to embed.
+
+        Returns:
+            List of embedding vectors (each vector is a list of f32 values).
+        """
+        return self._embedder.embed(texts)
+
+    def embed_single(self, text: str) -> list[float]:
+        """Generate embedding for a single text.
+
+        Args:
+            text: The text to embed.
+
+        Returns:
+            Embedding vector as a list of f32 values.
+        """
+        return self._embedder.embed_single(text)
+
+    @property
+    def dimension(self) -> int:
+        """Get the dimensionality of embeddings produced by this embedder."""
+        return self._embedder.dimension()
+
+    @property
+    def model_name(self) -> str:
+        """Get the model name used by this embedder."""
+        return self._embedder.get_model_name()
+
+
+def create_rust_embedder(
+    model: str = "BAAI/bge-small-en-v1.5",
+    cache_dir: str | None = None,
+) -> RustTextEmbedder:
+    """Create a Rust-backed text embedder.
+
+    Args:
+        model: The model identifier (e.g., "BAAI/bge-small-en-v1.5").
+               Use list_rust_embedder_models() to see available options.
+        cache_dir: Optional directory for caching model files.
+
+    Returns:
+        RustTextEmbedder instance.
+
+    Raises:
+        RustExtensionNotAvailableError: If Rust core is not available or disabled.
+        ValueError: If the model is not supported.
+        RuntimeError: If the embedder fails to initialize.
+    """
+    return RustTextEmbedder(model=model, cache_dir=cache_dir)
+
+
+def is_rust_embed_available() -> bool:
+    """Check if Rust embedding backend is available.
+
+    Returns:
+        True if Rust core is enabled AND the module is available, False otherwise.
+    """
+    return get_te_core() is not None
+
+
+def list_rust_embedder_models() -> list[tuple[str, int]]:
+    """List supported embedding models from Rust backend.
+
+    Returns:
+        List of (model_name, dimension) tuples, or empty list if unavailable.
+    """
+    module = get_te_core()
+    if module is None:
+        return []
+
+    try:
+        return module.PyTextEmbedder.list_supported_models()
+    except AttributeError:
+        return []
+
+
+def get_embed_backend_status() -> dict[str, bool]:
+    """Get diagnostic information about embedding backend availability.
+
+    Returns:
+        Dictionary with keys:
+        - rust_available: Whether Rust embedding is available
+        - rust_enabled: Whether the Rust core flag is enabled
+        - module_available: Whether the module can be imported
+    """
+    module_available = _check_rust_available()
+
+    return {
+        "rust_available": is_rust_embed_available(),
+        "rust_enabled": is_rust_core_enabled(),
+        "module_available": module_available,
+    }

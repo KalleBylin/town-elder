@@ -11,6 +11,8 @@ import pytest
 from town_elder import rust_adapter
 
 _FALLBACK_INDEX = 4
+_DEFAULT_EMBED_DIM = 384
+_TEST_MODEL_COUNT = 2
 
 
 class TestIsRustCoreEnabled:
@@ -316,3 +318,319 @@ class TestTruncateDiffAdapter:
         assert was_truncated is True
         assert truncated == "abc\n\n[truncated - exceeded 3 byte limit]"
         mock_module.is_diff_truncated.assert_called_once_with(truncated)
+
+
+class TestIsRustEmbedAvailable:
+    """Tests for the is_rust_embed_available function."""
+
+    def test_returns_false_when_flag_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return False when flag is off."""
+        monkeypatch.delenv(rust_adapter._ENV_FLAG, raising=False)
+        rust_adapter._reset_module_cache()
+        assert rust_adapter.is_rust_embed_available() is False
+
+    def test_returns_true_when_flag_on_and_module_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return True when flag is on and module is available."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_module = mock.MagicMock()
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            assert rust_adapter.is_rust_embed_available() is True
+
+    def test_returns_false_when_flag_on_but_module_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return False when flag is on but module unavailable."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        with mock.patch.object(
+            rust_adapter, "_check_rust_available", return_value=False
+        ):
+            rust_adapter._reset_module_cache()
+            assert rust_adapter.is_rust_embed_available() is False
+
+
+class TestListRustEmbedderModels:
+    """Tests for the list_rust_embedder_models function."""
+
+    def test_returns_empty_when_module_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return empty list when module is not available."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        with mock.patch.object(
+            rust_adapter, "_check_rust_available", return_value=False
+        ):
+            rust_adapter._reset_module_cache()
+            assert rust_adapter.list_rust_embedder_models() == []
+
+    def test_returns_models_when_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return model list when module is available."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_module = mock.MagicMock()
+        mock_module.PyTextEmbedder.list_supported_models.return_value = [
+            ("BAAI/bge-small-en-v1.5", _DEFAULT_EMBED_DIM),
+            ("BAAI/bge-base-en-v1.5", 768),
+        ]
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            models = rust_adapter.list_rust_embedder_models()
+            assert len(models) == _TEST_MODEL_COUNT
+            assert models[0] == ("BAAI/bge-small-en-v1.5", _DEFAULT_EMBED_DIM)
+
+    def test_returns_empty_when_attribute_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return empty list when PyTextEmbedder is not available."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_module = mock.MagicMock()
+        del mock_module.PyTextEmbedder
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            assert rust_adapter.list_rust_embedder_models() == []
+
+
+class TestGetEmbedBackendStatus:
+    """Tests for the get_embed_backend_status function."""
+
+    def test_status_all_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should report all unavailable when flag is off."""
+        monkeypatch.delenv(rust_adapter._ENV_FLAG, raising=False)
+        with mock.patch.object(
+            rust_adapter, "_check_rust_available", return_value=False
+        ):
+            rust_adapter._reset_module_cache()
+            status = rust_adapter.get_embed_backend_status()
+            assert status["rust_available"] is False
+            assert status["rust_enabled"] is False
+            assert status["module_available"] is False
+
+    def test_status_enabled_but_module_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should report flag enabled but module unavailable."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        with mock.patch.object(
+            rust_adapter, "_check_rust_available", return_value=False
+        ):
+            rust_adapter._reset_module_cache()
+            status = rust_adapter.get_embed_backend_status()
+            assert status["rust_enabled"] is True
+            assert status["module_available"] is False
+            assert status["rust_available"] is False
+
+    def test_status_all_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should report all available when flag is on and module exists."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_module = mock.MagicMock()
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            status = rust_adapter.get_embed_backend_status()
+            assert status["rust_enabled"] is True
+            assert status["module_available"] is True
+            assert status["rust_available"] is True
+
+
+class TestRustTextEmbedder:
+    """Tests for the RustTextEmbedder class."""
+
+    def test_raises_when_flag_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should raise RustExtensionNotAvailableError when flag is off."""
+        monkeypatch.delenv(rust_adapter._ENV_FLAG, raising=False)
+        rust_adapter._reset_module_cache()
+        with pytest.raises(rust_adapter.RustExtensionNotAvailableError):
+            rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
+
+    def test_raises_when_module_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should raise error when module is unavailable."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        with mock.patch.object(
+            rust_adapter, "_check_rust_available", return_value=False
+        ):
+            rust_adapter._reset_module_cache()
+            with pytest.raises(rust_adapter.RustExtensionNotAvailableError):
+                rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
+
+    def test_initializes_with_valid_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should initialize with valid model when module available."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_embedder = mock.MagicMock()
+        mock_module = mock.MagicMock()
+        mock_module.PyTextEmbedder.return_value = mock_embedder
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
+            assert embedder._embedder is mock_embedder
+            mock_module.PyTextEmbedder.assert_called_once_with(
+                "BAAI/bge-small-en-v1.5", None
+            )
+
+    def test_embed_delegates_to_rust(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should delegate embed call to Rust module."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_embedder = mock.MagicMock()
+        mock_embedder.embed.return_value = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+        mock_module = mock.MagicMock()
+        mock_module.PyTextEmbedder.return_value = mock_embedder
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
+            result = embedder.embed(["hello", "world"])
+            assert result == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+            mock_embedder.embed.assert_called_once_with(["hello", "world"])
+
+    def test_embed_single_delegates_to_rust(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should delegate embed_single call to Rust module."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_embedder = mock.MagicMock()
+        mock_embedder.embed_single.return_value = [0.1, 0.2, 0.3]
+        mock_module = mock.MagicMock()
+        mock_module.PyTextEmbedder.return_value = mock_embedder
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
+            result = embedder.embed_single("hello")
+            assert result == [0.1, 0.2, 0.3]
+            mock_embedder.embed_single.assert_called_once_with("hello")
+
+    def test_dimension_property(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return dimension from Rust embedder."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_embedder = mock.MagicMock()
+        mock_embedder.dimension.return_value = _DEFAULT_EMBED_DIM
+        mock_module = mock.MagicMock()
+        mock_module.PyTextEmbedder.return_value = mock_embedder
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
+            assert embedder.dimension == _DEFAULT_EMBED_DIM
+
+    def test_model_name_property(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return model name from Rust embedder."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_embedder = mock.MagicMock()
+        mock_embedder.get_model_name.return_value = "BAAI/bge-small-en-v1.5"
+        mock_module = mock.MagicMock()
+        mock_module.PyTextEmbedder.return_value = mock_embedder
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
+            assert embedder.model_name == "BAAI/bge-small-en-v1.5"
+
+
+class TestCreateRustEmbedder:
+    """Tests for the create_rust_embedder function."""
+
+    def test_creates_embedder_with_default_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should create embedder with default model."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_embedder = mock.MagicMock()
+        mock_module = mock.MagicMock()
+        mock_module.PyTextEmbedder.return_value = mock_embedder
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            embedder = rust_adapter.create_rust_embedder()
+            assert isinstance(embedder, rust_adapter.RustTextEmbedder)
+            mock_module.PyTextEmbedder.assert_called_once_with(
+                "BAAI/bge-small-en-v1.5", None
+            )
+
+    def test_creates_embedder_with_custom_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should create embedder with custom model."""
+        monkeypatch.setenv(rust_adapter._ENV_FLAG, "1")
+        mock_embedder = mock.MagicMock()
+        mock_module = mock.MagicMock()
+        mock_module.PyTextEmbedder.return_value = mock_embedder
+        custom_cache_dir = "/var/cache/town_elder/embeddings"
+        with (
+            mock.patch.object(
+                rust_adapter, "_check_rust_available", return_value=True
+            ),
+            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+        ):
+            rust_adapter._reset_module_cache()
+            embedder = rust_adapter.create_rust_embedder(
+                model="BAAI/bge-base-en-v1.5",
+                cache_dir=custom_cache_dir,
+            )
+            assert isinstance(embedder, rust_adapter.RustTextEmbedder)
+            mock_module.PyTextEmbedder.assert_called_once_with(
+                "BAAI/bge-base-en-v1.5", custom_cache_dir
+            )

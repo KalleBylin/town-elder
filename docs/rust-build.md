@@ -91,6 +91,37 @@ maturin develop
 maturin build --release
 ```
 
+### Building with Embedding Support
+
+The Rust extension includes text embedding support via fastembed. To build with embedding support:
+
+```bash
+# Build wheel with embedding features
+maturin build --release --features python --manifest-path rust/src/Cargo.toml
+
+# Or develop in-place with embedding support
+maturin develop --features python --manifest-path rust/src/Cargo.toml
+```
+
+The `python` feature includes `te-core/fastembed` which brings in the embedding runtime.
+
+### Creating Distributable Wheels
+
+To create wheels for distribution across platforms:
+
+```bash
+# Build for current platform
+maturin build --release --features python --out dist --manifest-path rust/src/Cargo.toml
+
+# List built wheels
+ls -la dist/*.whl
+```
+
+Wheels can be installed with pip:
+```bash
+pip install dist/*.whl
+```
+
 ### Manual PyO3 Build
 
 ```bash
@@ -111,6 +142,26 @@ import town_elder._te_core as te_core
 print(te_core.version())      # "0.1.0-scaffold"
 print(te_core.health())      # "te-core: OK"
 print(te_core.placeholder_fn())  # 42
+```
+
+### Text Embeddings
+
+With embedding support enabled:
+
+```python
+import town_elder._te_core as te_core
+
+# List available models
+models = te_core.PyTextEmbedder.list_supported_models()
+print(f"Available models: {models}")  # [("BAAI/bge-small-en-v1.5", 384), ...]
+
+# Create an embedder
+embedder = te_core.PyTextEmbedder("BAAI/bge-small-en-v1.5")
+print(f"Dimension: {embedder.dimension()}")  # 384
+
+# Embed text
+embedding = embedder.embed_single("Hello, world!")
+print(f"Embedding: {embedding[:5]}...")  # [0.1, 0.05, -0.02, ...]
 ```
 
 ## Development Notes

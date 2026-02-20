@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +40,66 @@ jobs:
           name: te-core-wheel-${{ matrix.os }}
           path: dist/*.whl
           if-no-files-found: error
+
+  smoke-test:
+    name: Smoke test (${{ matrix.os }})
+    needs: wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: te-core-wheel-${{ matrix.os }}
+          path: dist
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install wheel and test
+        shell: bash
+        run: |
+          # Find the wheel file
+          WHEEL=$(ls dist/*.whl | head -1)
+          echo "Installing $WHEEL"
+          pip install "$WHEEL"
+
+          # Run smoke tests
+          python -c "
+import sys
+print(f'Python: {sys.version}')
+
+# Test 1: Import module
+print('Test 1: Importing town_elder._te_core...')
+import town_elder._te_core
+print(f'  Module version: {town_elder._te_core.version()}')
+
+# Test 2: List supported models
+print('Test 2: Listing supported embedding models...')
+models = town_elder._te_core.PyTextEmbedder.list_supported_models()
+print(f'  Found {len(models)} models: {models[:2]}...')
+
+# Test 3: Create embedder
+print('Test 3: Creating embedder with default model...')
+embedder = town_elder._te_core.PyTextEmbedder('BAAI/bge-small-en-v1.5')
+print(f'  Model: {embedder.get_model_name()}, Dimension: {embedder.dimension()}')
+
+# Test 4: Embed single text
+print('Test 4: Embedding single text...')
+embedding = embedder.embed_single('Hello, world!')
+print(f'  Embedding length: {len(embedding)}')
+
+# Test 5: Embed multiple texts
+print('Test 5: Embedding multiple texts...')
+embeddings = embedder.embed(['Hello', 'World'])
+print(f'  Number of embeddings: {len(embeddings)}, dim: {len(embeddings[0])}')
+
+print('All smoke tests passed!')
+"
 
   native-binary:
     name: Build te-rs binary (${{ matrix.os }})
