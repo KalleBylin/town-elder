@@ -9,6 +9,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
+use te_core::Embedder;
 
 /// Python representation of a tracked file.
 #[pyclass(get_all)]
@@ -161,6 +163,7 @@ pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDiffParser>()?;
     m.add_class::<PyCommit>()?;
     m.add_class::<PyRSTChunk>()?;
+    m.add_class::<PyTextEmbedder>()?;
 
     m.add("__version__", te_core::get_version())?;
     Ok(())
@@ -434,6 +437,125 @@ fn json_value_to_pyobject(py: Python<'_>, value: &serde_json::Value) -> PyResult
         }
     };
     Ok(object)
+}
+
+// =============================================================================
+// Text Embedding Functions
+// =============================================================================
+
+/// Python wrapper for the FastEmbedder.
+///
+/// This class provides a Python-friendly interface to the Rust fastembed
+/// implementation for generating text embeddings.
+#[pyclass]
+pub struct PyTextEmbedder {
+    embedder: Arc<te_core::FastEmbedder>,
+    model_name: String,
+}
+
+#[pymethods]
+impl PyTextEmbedder {
+    /// Create a new TextEmbedder.
+    ///
+    /// Args:
+    ///     model: The model identifier (e.g., "BAAI/bge-small-en-v1.5")
+    ///     cache_dir: Optional directory for caching model files
+    ///
+    /// Raises:
+    ///     Exception: If the model is not supported or fails to load
+    #[new]
+    #[pyo3(signature = (model, cache_dir = None))]
+    fn new(model: String, cache_dir: Option<String>) -> PyResult<Self> {
+        // Validate model name first
+        if let Err(e) = te_core::validate_model_name(&model) {
+            return Err(pyo3::exceptions::PyValueError::new_err(e.to_string()));
+        }
+
+        // Note: The current FastEmbedder implementation doesn't support custom cache_dir
+        // but we validate the model exists. If cache_dir is provided, we could log a warning
+        // or the underlying implementation could be extended.
+        let _ = cache_dir;
+
+        match te_core::FastEmbedder::new(&model) {
+            Ok(embedder) => Ok(Self {
+                embedder: Arc::new(embedder),
+                model_name: model,
+            }),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    /// Generate embeddings for a list of texts.
+    ///
+    /// Args:
+    ///     texts: List of strings to embed
+    ///
+    /// Returns:
+    ///     List of embedding vectors (each vector is a list of f32 values)
+    ///
+    /// Raises:
+    ///     Exception: If embedding generation fails
+    fn embed(&self, texts: Vec<String>) -> PyResult<Vec<Vec<f32>>> {
+        match self.embedder.embed(&texts) {
+            Ok(embeddings) => {
+                Ok(embeddings.into_iter().map(|e| e.values).collect())
+            }
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    /// Generate embedding for a single text.
+    ///
+    /// Args:
+    ///     text: The text to embed
+    ///
+    /// Returns:
+    ///     Embedding vector as a list of f32 values
+    ///
+    /// Raises:
+    ///     Exception: If embedding generation fails
+    fn embed_single(&self, text: String) -> PyResult<Vec<f32>> {
+        match self.embedder.embed(&[text]) {
+            Ok(embeddings) => {
+                if let Some(embedding) = embeddings.into_iter().next() {
+                    Ok(embedding.values)
+                } else {
+                    Err(pyo3::exceptions::PyRuntimeError::new_err(
+                        "No embedding returned for single text".to_string(),
+                    ))
+                }
+            }
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    /// Get the dimensionality of embeddings produced by this embedder.
+    ///
+    /// Returns:
+    ///     The dimension size (e.g., 384 for bge-small)
+    fn dimension(&self) -> usize {
+        self.embedder.dimensions()
+    }
+
+    /// Get the model name used by this embedder.
+    ///
+    /// Returns:
+    ///     The model identifier string
+    fn get_model_name(&self) -> String {
+        self.model_name.clone()
+    }
+
+    /// Get list of supported model names.
+    ///
+    /// Returns:
+    ///     List of supported model identifiers
+    #[staticmethod]
+    fn list_supported_models() -> Vec<(String, usize)> {
+        te_core::KNOWN_EMBED_MODELS
+            .iter()
+            .map(|(name, dims)| (name.to_string(), *dims))
+            .collect()
+    }
 }
 
 // =============================================================================

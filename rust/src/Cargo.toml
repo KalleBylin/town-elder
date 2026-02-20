@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 
 [features]
 default = []
-python = ["dep:pyo3", "te-core/python"]
+python = ["dep:pyo3", "te-core/python", "te-core/fastembed"]
 
 [dependencies]
 te-core = { workspace = true }

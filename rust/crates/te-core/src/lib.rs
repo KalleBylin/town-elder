@@ -1171,15 +1171,15 @@ impl Embedder for InMemoryEmbedder {
 // =============================================================================
 
 /// Known embedding models and their dimensions.
-/// These match the models supported by the Python fastembed implementation.
+/// These match the models supported by the Rust fastembed 5.x implementation.
 pub const KNOWN_EMBED_MODELS: &[(&str, usize)] = &[
-    ("BAAI/bge-small-en-v1.5", 384),
-    ("BAAI/bge-base-en-v1.5", 768),
-    ("BAAI/bge-large-en-v1.5", 1024),
+    ("Xenova/bge-small-en-v1.5", 384),
+    ("Xenova/bge-base-en-v1.5", 768),
+    ("Xenova/bge-large-en-v1.5", 1024),
 ];
 
 /// Default embedding model.
-pub const DEFAULT_EMBED_MODEL: &str = "BAAI/bge-small-en-v1.5";
+pub const DEFAULT_EMBED_MODEL: &str = "Xenova/bge-small-en-v1.5";
 
 /// Get the expected dimensions for a model name.
 ///
