@@ -258,8 +258,13 @@ class _FakeDiffParser:
 
 
 class _FakeGitRunner:
-    def __init__(self, commits: list[Commit]):
+    def __init__(self, commits: list[Commit], existing_commits: set[str] | None = None):
         self._commits = commits
+        self._existing_commits = (
+            set(existing_commits)
+            if existing_commits is not None
+            else {commit.hash for commit in commits}
+        )
 
     def get_commits(
         self,
@@ -286,6 +291,9 @@ class _FakeGitRunner:
     def get_diff(self, commit_hash: str, max_size: int = 100 * 1024) -> str:
         _ = max_size
         return f"diff for {commit_hash}"
+
+    def commit_exists(self, commit_hash: str) -> bool:
+        return commit_hash in self._existing_commits
 
 
 class _StoreController:
@@ -711,6 +719,56 @@ def test_commit_index_handles_missing_sentinel_without_unsafe_state_advance(
     )
     # Should have indexed all available commits (more than limit, but should get all via pagination)
     assert len(controller.indexed_hashes) == _TEST_COMMITS_LARGE
+
+
+def test_commit_index_does_not_full_reindex_when_cursor_exists_outside_current_history(
+    monkeypatch, tmp_path
+):
+    """A valid cursor on another branch should not trigger stale/GC fallback."""
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+    state_file = data_dir / "index_state.json"
+
+    branch_cursor = "branch_commit_still_exists"
+    state_file.write_text(json.dumps({"last_indexed_commit": branch_cursor}))
+
+    total_commits = 150
+    commits = [_commit(f"c{i}") for i in range(total_commits, 0, -1)]
+    controller = _StoreController(fail_hashes=set())
+    factory = _FakeFactory(
+        git_runner=_FakeGitRunner(
+            commits, existing_commits={branch_cursor, *(commit.hash for commit in commits)}
+        ),
+        controller=controller,
+    )
+    config = SimpleNamespace(data_dir=data_dir, embed_model="test-model")
+
+    def fake_get_config(data_dir=None):
+        _ = data_dir
+        return config
+
+    def fake_get_service_factory(data_dir=None):
+        _ = data_dir
+        return factory
+
+    monkeypatch.setattr(cli_services, "get_config", fake_get_config)
+    monkeypatch.setattr(cli_services, "get_service_factory", fake_get_service_factory)
+
+    result = runner.invoke(
+        cli.app,
+        ["index", "commits", "--repo", str(repo_path), "--limit", str(_TEST_LIMIT)],
+    )
+
+    assert result.exit_code == 0
+    assert "Warning: Last indexed commit not found" not in result.output
+    assert "garbage-collected commits" not in result.output
+    assert "not in current branch history" in result.output
+    # Should only index the selected window, not the full branch history.
+    assert len(controller.indexed_hashes) == _TEST_LIMIT
+    # Cursor should reset to the current branch frontier (newest commit in this window).
+    assert _get_last_indexed_commit(state_file, repo_path) == f"c{total_commits}"
 
 
 def test_commit_index_retry_catches_up_after_sentinel_found(monkeypatch, tmp_path):

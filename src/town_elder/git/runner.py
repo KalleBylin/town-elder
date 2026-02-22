@@ -231,6 +231,14 @@ class GitRunner:
         except subprocess.CalledProcessError:
             return []
 
+    def commit_exists(self, commit_hash: str) -> bool:
+        """Check whether a commit object exists in the repository."""
+        try:
+            self._run_git(["cat-file", "-e", f"{commit_hash}^{{commit}}"])
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
     def get_diff(self, commit_hash: str, max_size: int = DEFAULT_MAX_DIFF_SIZE) -> str:
         """Get the diff for a specific commit.
 

@@ -1850,21 +1850,38 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
         if found_last:
             commits = filtered
         else:
-            # Sentinel still not found after exhausting all commits.
-            # This means the state file points to a garbage-collected or corrupted commit.
-            # We must not do partial indexing with unsafe state advance.
-            # Index all available commits (from all batches) but don't advance state.
-            console.print(
-                "[yellow]Warning: Last indexed commit not found in history.[/yellow]"
+            commit_exists_probe = getattr(git, "commit_exists", None)
+            commit_exists = (
+                callable(commit_exists_probe) and commit_exists_probe(last_indexed)
             )
-            console.print(
-                "[yellow]This may indicate stale state or garbage-collected commits.[/yellow]"
-            )
-            console.print(
-                "[yellow]Indexing all available commits without advancing state.[/yellow]"
-            )
-            # Use filtered (contains all commits from all batches), not just first page
-            commits = filtered
+
+            if commit_exists:
+                # The cursor commit still exists in the repo, but it's not reachable from
+                # the current HEAD history (e.g. branch switch or rebase). Avoid treating
+                # this as stale/GC state and don't force a full catch-up scan.
+                console.print(
+                    "[yellow]Warning: Last indexed commit is not in current branch history.[/yellow]"
+                )
+                console.print(
+                    "[yellow]Resetting incremental cursor to the current branch after indexing the selected window.[/yellow]"
+                )
+                commits = filtered if all_history else initial_commits
+                sentinel_found = True
+            else:
+                # Sentinel still not found after exhausting all commits in the current history,
+                # and the commit object is missing entirely. This is likely stale/GC state.
+                # We must not do partial indexing with unsafe state advance.
+                console.print(
+                    "[yellow]Warning: Last indexed commit not found in history.[/yellow]"
+                )
+                console.print(
+                    "[yellow]This may indicate stale state or garbage-collected commits.[/yellow]"
+                )
+                console.print(
+                    "[yellow]Indexing all available commits without advancing state.[/yellow]"
+                )
+                # Use filtered (contains all commits from all batches), not just first page
+                commits = filtered
     elif all_history:
         # For --all mode, get all commits (may need multiple fetches)
         offset = len(commits)
