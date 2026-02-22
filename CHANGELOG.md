@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/KalleBylin/town-elder/compare/v0.2.1...v0.3.0) (TBD)
+
+
+### Features
+
+* **embeddings:** add Rust embedding backend with auto-fallback to Python ([#te-acu](https://github.com/KalleBylin/town-elder/issues/te-acu))
+* Add `TOWN_ELDER_EMBED_BACKEND` config for backend selection (`auto`, `python`, `rust`)
+* Add `TE_USE_RUST_CORE` env var to enable Rust extension
+
+### Migration
+
+* Remove `pillow` dependency (no longer required for runtime)
+* Default embedding backend is now `auto` (prefers Rust when available)
+* Users can explicitly set `TOWN_ELDER_EMBED_BACKEND=python` to stay with Python-only
+* Rust backend requires building extension: `cd rust && maturin develop` and `TE_USE_RUST_CORE=1`
+
 ## [0.2.1](https://github.com/KalleBylin/town-elder/compare/v0.2.0...v0.2.1) (2026-02-17)
 
 

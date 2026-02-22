@@ -1,7 +1,7 @@
 [project]
 name = "town-elder"
 version = "0.2.1"
-description = "A semantic git CLI tool using zvec + fastembed"
+description = "A semantic git CLI tool using zvec with multi-backend embeddings"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Kalle Bylin" }]
@@ -16,7 +16,6 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "numpy>=1.20",
     "docutils>=0.20.0",
-    "pillow>=12.1.1",
 ]
 
 [project.optional-dependencies]

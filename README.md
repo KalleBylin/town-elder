@@ -271,10 +271,55 @@ your-project/
 ### Default Settings
 
 - **Embedding model**: Fastembed (BAAI/bge-small-en-v1.5, 384 dimensions)
+- **Embedding backend**: Auto (prefers Rust when available, falls back to Python)
 - **Data location**: `.town_elder/` in your project directory
 - **Indexed file types**: `.py`, `.md`, and `.rst` files
 
 Configuration is managed via environment variables or `pyproject.toml`. See `town_elder.config` for available options.
+
+### Embedding Backend Configuration
+
+Town Elder supports multiple embedding backends:
+
+| Backend | Description |
+|---------|-------------|
+| `auto` (default) | Prefers Rust backend when available, falls back to Python |
+| `python` | Uses Python fastembed library (always available) |
+| `rust` | Uses Rust extension (requires `TE_USE_RUST_CORE=1` and built extension) |
+
+#### Environment Variables
+
+- `TOWN_ELDER_EMBED_BACKEND`: Set to `auto`, `python`, or `rust` to control backend selection
+- `TE_USE_RUST_CORE`: Set to `1` or `true` to enable Rust extension (required for `rust` backend)
+
+#### Migration from Python-Only
+
+Prior versions used Python fastembed exclusively. The migration path:
+
+**To enable Rust backend (recommended for performance):**
+```bash
+# Install Rust extension
+cd rust && maturin develop
+
+# Enable Rust core
+export TE_USE_RUST_CORE=1
+```
+
+**To stay with Python backend:**
+```bash
+# Explicitly use Python backend
+export TOWN_ELDER_EMBED_BACKEND=python
+```
+
+**Rollback** (if Rust backend causes issues):
+```bash
+# Disable Rust core
+unset TE_USE_RUST_CORE
+# Or explicitly set Python backend
+export TOWN_ELDER_EMBED_BACKEND=python
+```
+
+The `auto` backend will automatically fall back to Python if Rust is unavailable, ensuring backward compatibility.
 
 ## File Indexing Notes
 
@@ -336,9 +381,10 @@ On first use, Town Elder downloads an embedding model from HuggingFace. This may
 | Issue | Solution |
 |-------|----------|
 | Slow first run | Normal - model is being downloaded. Wait for completion. |
-| "Failed to load embedding backend" | Install fastembed: `pip install fastembed` or `uv pip install fastembed` |
+| "Failed to load embedding backend" | Install fastembed: `pip install fastembed` or `uv pip install fastembed`. Or set `TOWN_ELDER_EMBED_BACKEND=python` to use Python backend explicitly. |
 | Network error during download | Ensure internet access to HuggingFace (huggingface.co). Check proxy settings if behind a firewall. |
 | Model not found | Ensure fastembed is installed: `pip show fastembed` |
+| Rust backend unavailable | Install Rust extension: `cd rust && maturin develop`. Or set `TE_USE_RUST_CORE=1`. Falls back to Python automatically in `auto` mode. |
 
 ### Hook Prerequisites
 
