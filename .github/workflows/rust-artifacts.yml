@@ -70,8 +70,43 @@ jobs:
           echo "Installing $WHEEL"
           pip install "$WHEEL"
 
-          # Run smoke tests - decode from base64 to avoid YAML special char issues
-          echo "aW1wb3J0IHN5cwpwcmludChmIlB5dGhvbjoge3N5cy52ZXJzaW9ufSIpCgojIFRlc3QgMTogSW1wb3J0IG1vZHVsZQpwcmludCgiVGVzdCAxOiBJbXBvcnRpbmcgdG93bl9lbGRlci5fdGVfY29yZS4uLiIpCmltcG9ydCB0b3duX2VsZGVyLl90ZV9jb3JlCnByaW50KGYiICBNb2R1bGUgdmVyc2lvbjoge3Rvd25fZWxkZXIuX3RlX2NvcmUudmVyc2lvbigpfSIpCgojIFRlc3QgMjogTGlzdCBzdXBwb3J0ZWQgbW9kZWxzCnByaW50KCJUZXN0IDI6IExpc3Rpbmcgc3VwcG9ydGVkIGVtYmVkZGluZyBtb2RlbHMuLi4iKQptb2RlbHMgPSB0b3duX2VsZGVyLl90ZV9jb3JlLlB5VGV4dEVtYmVkZGVyLmxpc3Rfc3VwcG9ydGVkX21vZGVscygpCnByaW50KGYiICBGb3VuZCB7bGVuKG1vZGVsKX0gbW9kZWxzOiB7bW9kZWxzWzoyXX0uLi4iKQojIER5bmFtaWNhbGx5IHNlbGVjdCBhIHZhbGlkIG1vZGVsIChmaXJzdCBlbnRyeSkKbW9kZWxfaWQgPSBtb2RlbHNbMF1bMF0gaWYgbW9kZWxzIGVsc2UgTm9uZQppZiBub3QgbW9kZWxfaWQ6CiAgICByYWlzZSBSdW50aW1lRXJyb3IoIk5vIGVtYmVkZGluZyBtb2RlbHMgYXZhaWxhYmxlIikKcHJpbnQoZiIgIFVzaW5nIG1vZGVsOiB7bW9kZWxfaWR9IikKCiMgVGVzdCAzOiBDcmVhdGUgZW1iZWRkZXIgd2l0aCBkeW5hbWljYWxseSBzZWxlY3RlZCBtb2RlbApwcmludCgiVGVzdCAzOiBDcmVhdGluZyBlbWJlZGRlciB3aXRoIGR5bmFtaWMgbW9kZWwuLi4iKQplbWJlZGRlciA9IHRvd25fZWxkZXIuX3RlX2NvcmUuUHlUZXh0RW1iZWRkZXIobW9kZWxfaWQpCnByaW50KGYiICBNb2RlbDoge2VtYmVkZGVyLmdldF9tb2RlbF9uYW1lKCl9LCBEaW1lbnNpb246IHtlbWJlZGRlci5kaW1lbnNpb24oKX0iKQojIFRlc3QgNDogRW1iZWQgc2luZ2xlIHRleHQKcHJpbnQoIlRlc3QgNDogRW1iZWRkaW5nIHNpbmdsZSB0ZXh0Li4uIikKZW1iZWRkaW5nID0gZW1iZWRkZXIuZW1iZWRfc2luZ2xlKCJIZWxsbywgd29ybGQhIikKcHJpbnQoZiIgIEVtYmVkZGluZyBsZW5ndGg6IHtsZW4oZW1iZWRkaW5nKX0iKQojIFRlc3QgNTogRW1iZWQgbXVsdGlwbGUgdGV4dHMKcHJpbnQoIlRlc3QgNTogRW1iZWRkaW5nIG11bHRpcGxlIHRleHRzLi4uIikKZW1iZWRkaW5ncyA9IGVtYmVkZGVyLmVtYmVkKFsnSGVsbG8nLCAnV29ybGQnXSkKcHJpbnQoZiIgIE51bWJlciBvZiBlbWJlZGRpbmdzOiB7bGVuKGVtYmVkZGluZ3MpfSwgZGltOiB7bGVuKGVtYmVkZGluZ3NbMF0pfSIpCgpwcmludCgiQWxsc21va2UgdGVzdHMgcGFzc2VkISIpCg==" | base64 -d > smoke_test.py
+          # Run smoke tests
+          cat > smoke_test.py <<'PY'
+          import sys
+          print(f"Python: {sys.version}")
+
+          # Test 1: Import module
+          print("Test 1: Importing town_elder._te_core...")
+          import town_elder._te_core
+          print(f"  Module version: {town_elder._te_core.version()}")
+
+          # Test 2: List supported models
+          print("Test 2: Listing supported embedding models...")
+          models = town_elder._te_core.PyTextEmbedder.list_supported_models()
+          print(f"  Found {len(models)} models: {models[:2]}...")
+          # Dynamically select a valid model (first entry)
+          model_id = models[0][0] if models else None
+          if not model_id:
+              raise RuntimeError("No embedding models available")
+          print(f"  Using model: {model_id}")
+
+          # Test 3: Create embedder with dynamically selected model
+          print("Test 3: Creating embedder with dynamic model...")
+          embedder = town_elder._te_core.PyTextEmbedder(model_id)
+          print(f"  Model: {embedder.get_model_name()}, Dimension: {embedder.dimension()}")
+
+          # Test 4: Embed single text
+          print("Test 4: Embedding single text...")
+          embedding = embedder.embed_single("Hello, world!")
+          print(f"  Embedding length: {len(embedding)}")
+
+          # Test 5: Embed multiple texts
+          print("Test 5: Embedding multiple texts...")
+          embeddings = embedder.embed(["Hello", "World"])
+          print(f"  Number of embeddings: {len(embeddings)}, dim: {len(embeddings[0])}")
+
+          print("All smoke tests passed!")
+          PY
 
           python smoke_test.py
 
