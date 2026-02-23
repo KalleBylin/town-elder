@@ -221,6 +221,9 @@ def get_cli_services(
         if include_embedder:
             embedder = svc.create_embedder()
         store = svc.create_vector_store()
+        ensure_ready = getattr(store, "ensure_ready", None)
+        if callable(ensure_ready):
+            ensure_ready()
     except ServiceInitError as e:
         console.print(f"[red]Error opening storage:[/red] {_escape_rich(str(e))}")
         raise typer.Exit(code=EXIT_ERROR)

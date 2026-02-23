@@ -108,6 +108,10 @@ class ZvecStore:
 
         return self._collection
 
+    def ensure_ready(self) -> None:
+        """Eagerly validate that the vector store backend can open/create storage."""
+        self._get_collection()
+
     @staticmethod
     def _vector_to_list(vector: np.ndarray) -> list[float]:
         return np.asarray(vector, dtype=np.float32).tolist()

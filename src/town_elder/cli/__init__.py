@@ -1852,6 +1852,9 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
         git = svc.create_git_runner(repo_path)
         embedder = svc.create_embedder()
         store = svc.create_vector_store()
+        ensure_ready = getattr(store, "ensure_ready", None)
+        if callable(ensure_ready):
+            ensure_ready()
         diff_parser = svc.create_diff_parser()
     except ServiceInitError as e:
         console.print(f"[red]Error initializing services:[/red] {_escape_rich(str(e))}")
