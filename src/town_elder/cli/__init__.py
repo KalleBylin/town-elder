@@ -281,24 +281,6 @@ python -m town_elder {data_dir_arg} index commits --repo "$(git rev-parse --show
 """
 
 
-def _remove_legacy_post_index_change_te_hook(hooks_dir: Path) -> bool:
-    """Remove legacy Town Elder post-index-change hook if present.
-
-    Older installs may have used Git's post-index-change hook, which fires on
-    `git add`. If post-commit is also installed, commit indexing runs twice.
-    """
-    legacy_hook_path = hooks_dir / "post-index-change"
-    if not legacy_hook_path.exists() or legacy_hook_path.is_symlink():
-        return False
-
-    content = _safe_read_hook(legacy_hook_path)
-    if content is None or not _is_te_hook(content):
-        return False
-
-    legacy_hook_path.unlink()
-    return True
-
-
 def set_data_dir(path: Path | str | None) -> None:
     """Set the global data directory.
 
@@ -2109,12 +2091,6 @@ def install(
 
     # Create hooks directory if it doesn't exist
     hooks_dir.mkdir(parents=True, exist_ok=True)
-
-    # Clean up legacy hook type to avoid duplicate indexing on git add + commit.
-    if _remove_legacy_post_index_change_te_hook(hooks_dir):
-        console.print(
-            "[yellow]Removed legacy Town Elder post-index-change hook to prevent duplicate indexing[/yellow]"
-        )
 
     # Check if hook already exists
     if hook_path.exists() and not force:

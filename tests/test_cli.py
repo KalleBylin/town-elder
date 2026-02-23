@@ -105,38 +105,6 @@ class TestHookInstall:
         assert hook_path.exists()
         assert hook_path.stat().st_mode & 0o111  # executable
 
-    def test_hook_install_removes_legacy_post_index_change_te_hook(self, temp_git_repo: Path):
-        """Hook install should remove legacy TE post-index-change hook to avoid duplicate indexing."""
-        result = subprocess.run(
-            ["uv", "run", "te", "init", "--path", str(temp_git_repo)],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-
-        hooks_dir = temp_git_repo / ".git" / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        legacy_hook = hooks_dir / "post-index-change"
-        legacy_hook.write_text(
-            "#!/bin/sh\n"
-            "# legacy Town Elder hook\n"
-            "te index commits --repo \"$(git rev-parse --show-toplevel)\"\n"
-        )
-        legacy_hook.chmod(0o755)
-
-        result = subprocess.run(
-            ["uv", "run", "te", "hook", "install", "--repo", str(temp_git_repo)],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert "Removed legacy Town Elder post-index-change hook" in (result.stdout + result.stderr)
-
-        post_commit_hook = hooks_dir / "post-commit"
-        assert post_commit_hook.exists()
-        assert not legacy_hook.exists()
-
-
 class TestHookLauncherPortability:
     """Tests for hook launcher portability (uv/uvx/te/python fallback)."""
 
