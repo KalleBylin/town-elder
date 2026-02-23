@@ -1912,6 +1912,7 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
     skipped_count = 0
     frontier_commit_hash: str | None = None
     frontier_blocked = False
+    embed_cache_note_printed = False
 
     # Process commits in batches
     try:
@@ -1955,6 +1956,12 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
                 # Batch generate embeddings for all valid commits in this batch
                 if commit_data:
                     texts = [text for _, text in commit_data]
+                    if not embed_cache_note_printed:
+                        console.print(
+                            "[dim]Note: a 'Fetching N files' progress line here comes from the embedding model cache "
+                            "(FastEmbed/Hugging Face artifacts), not repository file indexing.[/dim]"
+                        )
+                        embed_cache_note_printed = True
                     embeddings = list(embedder.embed(texts))
 
                     # Insert embeddings into store
