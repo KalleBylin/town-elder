@@ -3,7 +3,7 @@
 //! PyO3 module entrypoint for town_elder
 //!
 //! This module provides Python bindings for the te-core Rust crate.
-//! The module is exposed as `town_elder._te_core`.
+//! The module is exposed as `town_elder._core`.
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict};
@@ -112,7 +112,7 @@ impl PyDiffParser {
 
 /// Initialize the PyO3 module with te-core functions.
 #[pymodule]
-pub fn _te_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Re-export functions from te-core
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(health, m)?)?;

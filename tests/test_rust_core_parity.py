@@ -31,7 +31,7 @@ from town_elder.indexing.git_hash_scanner import (
 
 # Try to import the Rust extension - tests will be skipped if not available
 try:
-    from town_elder import _te_core as te_core_rust
+    from town_elder import _core as te_core_rust
 
     RUST_AVAILABLE = True
 except ImportError:

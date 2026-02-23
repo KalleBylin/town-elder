@@ -48,7 +48,7 @@ def _check_rust_available() -> bool:
     """
     try:
         # pylint: disable=import-error,unused-import
-        import town_elder._te_core  # noqa: F401
+        import town_elder._core  # noqa: F401
         return True
     except ImportError:
         return False
@@ -83,13 +83,13 @@ def get_te_core() -> Any | None:
         try:
             import sys
 
-            cached_module = sys.modules.get("town_elder._te_core")
+            cached_module = sys.modules.get("town_elder._core")
             if cached_module is not None:
                 _te_core_module = cached_module
                 return _te_core_module
 
             # pylint: disable=import-error
-            import town_elder._te_core as _te_core_module
+            import town_elder._core as _te_core_module
             return _te_core_module
         except ImportError:
             return None

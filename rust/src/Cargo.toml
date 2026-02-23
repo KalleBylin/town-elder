@@ -1,12 +1,12 @@
 [package]
-name = "te-cli"
+name = "town-elder-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
 [package.metadata]
-maturin = { name = "town-elder-te-core" }
+maturin = { name = "town-elder-core" }
 
 [[bin]]
 name = "te-rs"

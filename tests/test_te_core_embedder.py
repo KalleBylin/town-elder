@@ -2,7 +2,7 @@
 
 import pytest
 
-from town_elder import _te_core
+from town_elder import _core as _te_core
 
 # Constants for expected dimensions
 DIM_SMALL = 384

@@ -10,7 +10,7 @@ from town_elder.indexing.file_scanner import (
 )
 
 try:
-    import town_elder._te_core  # noqa: F401
+    import town_elder._core  # noqa: F401
 
     RUST_AVAILABLE = True
 except ImportError:

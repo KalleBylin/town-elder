@@ -86,7 +86,7 @@ class TestGetTeCore:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             result = rust_adapter.get_te_core()
@@ -138,7 +138,7 @@ class TestGetTeCoreOrRaise:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             result = rust_adapter.get_te_core_or_raise()
@@ -341,7 +341,7 @@ class TestIsRustEmbedAvailable:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             assert rust_adapter.is_rust_embed_available() is True
@@ -386,7 +386,7 @@ class TestListRustEmbedderModels:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             models = rust_adapter.list_rust_embedder_models()
@@ -404,7 +404,7 @@ class TestListRustEmbedderModels:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             assert rust_adapter.list_rust_embedder_models() == []
@@ -451,7 +451,7 @@ class TestGetEmbedBackendStatus:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             status = rust_adapter.get_embed_backend_status()
@@ -496,7 +496,7 @@ class TestRustTextEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             with pytest.raises(ValueError) as exc_info:
@@ -517,7 +517,7 @@ class TestRustTextEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             with pytest.raises(RuntimeError) as exc_info:
@@ -536,7 +536,7 @@ class TestRustTextEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
@@ -558,7 +558,7 @@ class TestRustTextEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
@@ -579,7 +579,7 @@ class TestRustTextEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
@@ -600,7 +600,7 @@ class TestRustTextEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
@@ -619,7 +619,7 @@ class TestRustTextEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             embedder = rust_adapter.RustTextEmbedder("BAAI/bge-small-en-v1.5")
@@ -641,7 +641,7 @@ class TestCreateRustEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             embedder = rust_adapter.create_rust_embedder()
@@ -663,7 +663,7 @@ class TestCreateRustEmbedder:
             mock.patch.object(
                 rust_adapter, "_check_rust_available", return_value=True
             ),
-            mock.patch.dict("sys.modules", {"town_elder._te_core": mock_module}),
+            mock.patch.dict("sys.modules", {"town_elder._core": mock_module}),
         ):
             rust_adapter._reset_module_cache()
             embedder = rust_adapter.create_rust_embedder(

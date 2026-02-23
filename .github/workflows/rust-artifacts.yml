@@ -14,7 +14,7 @@ env:
 
 jobs:
   wheels:
-    name: Build te-core wheel (${{ matrix.os }}-${{ matrix.python }})
+    name: Build core wheel (${{ matrix.os }}-${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -93,13 +93,13 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v5
         with:
-          name: te-core-wheel-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.artifact_target }}
+          name: core-wheel-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.artifact_target }}
           path: dist/*.whl
           if-no-files-found: error
 
   # Build source distribution (only once, on ubuntu-latest with default Python)
   sdist:
-    name: Build te-core sdist
+    name: Build core sdist
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -122,7 +122,7 @@ jobs:
       - name: Upload sdist artifact
         uses: actions/upload-artifact@v5
         with:
-          name: te-core-sdist
+          name: core-sdist
           path: dist/*.tar.gz
           if-no-files-found: error
 
@@ -151,7 +151,7 @@ jobs:
 
       - uses: actions/download-artifact@v5
         with:
-          name: te-core-wheel-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.target }}
+          name: core-wheel-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.target }}
           path: dist
 
       - name: Set up Python
@@ -173,13 +173,13 @@ jobs:
           print(f"Python: {sys.version}")
 
           # Test 1: Import module
-          print("Test 1: Importing town_elder._te_core...")
-          import town_elder._te_core
-          print(f"  Module version: {town_elder._te_core.version()}")
+          print("Test 1: Importing town_elder._core...")
+          import town_elder._core
+          print(f"  Module version: {town_elder._core.version()}")
 
           # Test 2: List supported models
           print("Test 2: Listing supported embedding models...")
-          models = town_elder._te_core.PyTextEmbedder.list_supported_models()
+          models = town_elder._core.PyTextEmbedder.list_supported_models()
           print(f"  Found {len(models)} models: {models[:2]}...")
           # Dynamically select a valid model (first entry)
           model_id = models[0][0] if models else None
@@ -189,7 +189,7 @@ jobs:
 
           # Test 3: Create embedder with dynamically selected model
           print("Test 3: Creating embedder with dynamic model...")
-          embedder = town_elder._te_core.PyTextEmbedder(model_id)
+          embedder = town_elder._core.PyTextEmbedder(model_id)
           print(f"  Model: {embedder.get_model_name()}, Dimension: {embedder.dimension()}")
 
           # Test 4: Embed single text
@@ -247,12 +247,12 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: [wheels, sdist]
-    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v') && github.event.release.prerelease == false
+    needs: [wheels, sdist, smoke-test]
+    if: github.event_name == 'release' && startsWith(github.ref_name, 'v') && github.event.release.prerelease == false
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/town-elder-te-core/
+      url: https://pypi.org/project/town-elder-core/
     permissions:
       attestations: write
       contents: read
@@ -261,15 +261,17 @@ jobs:
       - name: Download wheel artifacts
         uses: actions/download-artifact@v5
         with:
-          pattern: te-core-wheel-*
+          pattern: core-wheel-*
           path: dist-flat
           merge-multiple: true
 
       - name: Download sdist artifact
         uses: actions/download-artifact@v5
         with:
-          name: te-core-sdist
+          name: core-sdist
           path: dist-flat
+
+      - uses: actions/checkout@v4
 
       - name: Inspect publish artifacts
         shell: bash
@@ -283,27 +285,78 @@ jobs:
         with:
           version: "0.7.21"
 
-      - name: Verify release tag matches version
+      - name: Verify release tag matches workspace and artifact versions
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          # Extract version from the first wheel filename
-          WHEEL=$(ls dist-flat/*.whl | head -1)
-          if [ -z "$WHEEL" ]; then
-            echo "No wheel found"
-            exit 1
-          fi
-          # Extract version from wheel name: town_elder_te_core-0.1.0-*.whl
-          WHEEL_VERSION=$(echo "$WHEEL" | sed -E 's/.*town_elder_te_core-([0-9.]+)-.*/\1/')
-          TAG_VERSION="${RELEASE_TAG#v}"
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
 
-          echo "Wheel version: $WHEEL_VERSION"
-          echo "Tag version: $TAG_VERSION"
+          tag = os.environ["RELEASE_TAG"]
+          if not tag.startswith("v"):
+              print(f"Release tag must start with 'v': {tag}", file=sys.stderr)
+              sys.exit(1)
+          tag_version = tag[1:]
 
-          if [ "$WHEEL_VERSION" != "$TAG_VERSION" ]; then
-            echo "Version mismatch: wheel=$WHEEL_VERSION, tag=$TAG_VERSION"
-            exit 1
-          fi
+          workspace_toml = Path("rust/Cargo.toml").read_text(encoding="utf-8")
+          workspace_match = re.search(
+              r"(?ms)^\[workspace\.package\].*?^version\s*=\s*\"([^\"]+)\"",
+              workspace_toml,
+          )
+          if not workspace_match:
+              print("Could not determine workspace version from rust/Cargo.toml", file=sys.stderr)
+              sys.exit(1)
+          workspace_version = workspace_match.group(1)
+
+          dist_dir = Path("dist-flat")
+          wheels = sorted(dist_dir.glob("*.whl"))
+          sdists = sorted(dist_dir.glob("*.tar.gz"))
+          if not wheels:
+              print("No wheel artifacts found in dist-flat", file=sys.stderr)
+              sys.exit(1)
+          if len(sdists) != 1:
+              print(f"Expected exactly one sdist artifact, found {len(sdists)}", file=sys.stderr)
+              sys.exit(1)
+
+          wheel_pattern = re.compile(r"^town_elder_core-([A-Za-z0-9._+!-]+)-")
+          sdist_pattern = re.compile(r"^town_elder_core-([A-Za-z0-9._+!-]+)\.tar\.gz$")
+
+          versions = set()
+          for wheel in wheels:
+              match = wheel_pattern.match(wheel.name)
+              if not match:
+                  print(f"Unexpected wheel filename: {wheel.name}", file=sys.stderr)
+                  sys.exit(1)
+              versions.add(match.group(1))
+
+          sdist_match = sdist_pattern.match(sdists[0].name)
+          if not sdist_match:
+              print(f"Unexpected sdist filename: {sdists[0].name}", file=sys.stderr)
+              sys.exit(1)
+          versions.add(sdist_match.group(1))
+
+          if len(versions) != 1:
+              print(f"Artifact version mismatch across files: {sorted(versions)}", file=sys.stderr)
+              sys.exit(1)
+          artifact_version = next(iter(versions))
+
+          print(f"Tag version: {tag_version}")
+          print(f"Workspace version: {workspace_version}")
+          print(f"Artifact version: {artifact_version}")
+
+          if artifact_version != workspace_version:
+              print(
+                  f"Version mismatch: artifact={artifact_version}, workspace={workspace_version}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          if tag_version != artifact_version:
+              print(f"Version mismatch: tag={tag_version}, artifact={artifact_version}", file=sys.stderr)
+              sys.exit(1)
+          PY
 
       - name: Generate artifact attestations
         uses: actions/attest-build-provenance@v2

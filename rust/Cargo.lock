@@ -2617,17 +2617,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
-name = "te-cli"
-version = "0.2.1"
-dependencies = [
- "clap",
- "env_logger",
- "pyo3",
- "serde_json",
- "te-core",
-]
-
-[[package]]
 name = "te-core"
 version = "0.2.1"
 dependencies = [
@@ -2825,6 +2814,17 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
+
+[[package]]
+name = "town-elder-core"
+version = "0.2.1"
+dependencies = [
+ "clap",
+ "env_logger",
+ "pyo3",
+ "serde_json",
+ "te-core",
+]
 
 [[package]]
 name = "tracing"
