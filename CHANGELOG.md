@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.1](https://github.com/KalleBylin/town-elder/compare/v0.3.0...v0.3.1) (2026-02-23)
+
+
+### Bug Fixes
+
+* **ci:** skip uv lock check on release-please merge push ([e2b8b6a](https://github.com/KalleBylin/town-elder/commit/e2b8b6aa881b2b79f9eb81d7d85619fe81010823))
+* **cli:** clarify model cache fetch logging ([a5f5ffb](https://github.com/KalleBylin/town-elder/commit/a5f5ffb610d6415c2471489f1362b03adb009188))
+* **cli:** reduce file indexing progress noise ([229d090](https://github.com/KalleBylin/town-elder/commit/229d090445361bf622508e65632cf16c16936976))
+* **hooks:** remove legacy post-index-change hook ([7413d95](https://github.com/KalleBylin/town-elder/commit/7413d958c9d67ca3b3cc001ae85e1d08d859d4b3))
+* **index:** fail fast when vector store is unavailable ([db0e868](https://github.com/KalleBylin/town-elder/commit/db0e8685472bcc1def3b6a5f2bdd0f5b33f51a50))
+
 ## [0.3.0](https://github.com/KalleBylin/town-elder/compare/v0.2.1...v0.3.0) (2026-02-23)
 
 
