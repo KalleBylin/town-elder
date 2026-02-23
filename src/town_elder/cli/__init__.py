@@ -88,10 +88,15 @@ def index_callback(
     all: bool = typer.Option(
         False,
         "--all",
-        help="Index all project files in current directory (full repository file indexing)",
+        help="Index both project files and git commit history in current directory",
+    ),
+    force_full: bool = typer.Option(
+        False,
+        "--force-full",
+        help="Force full re-index for both files and commits (ignore incremental state)",
     ),
 ) -> None:
-    """Index subcommand: use 'te index --all' for full file indexing, or 'te index files' / 'te index commits' for specific indexing."""
+    """Index subcommand: use `te index --all` for files + commits, or subcommands."""
     if all and ctx.invoked_subcommand is not None:
         error_console.print(
             f"[red]Error:[/red] --all cannot be combined with 'te index {ctx.invoked_subcommand}'"
@@ -102,9 +107,25 @@ def index_callback(
         raise typer.Exit(code=EXIT_INVALID_ARG)
 
     if all:
-        # Route to index_files with default path "."
-        # Must pass None for exclude since that's the default in index_files
-        ctx.invoke(index_files, ctx=ctx, path=".", exclude=None)
+        file_incremental = not force_full
+        commit_incremental = not force_full
+        console.print("[bold]Running full index pipeline:[/bold] files + commits")
+        ctx.invoke(
+            index_files,
+            ctx=ctx,
+            path=".",
+            exclude=None,
+            incremental=file_incremental,
+            force_full=force_full,
+        )
+        ctx.invoke(
+            index_commits,
+            ctx=ctx,
+            path=".",
+            all_history=force_full,
+            incremental=commit_incremental,
+            force_full=force_full,
+        )
 
 
 # Global data directory option - DEPRECATED, use CLIContext instead
@@ -626,6 +647,8 @@ _FILE_INDEX_STAGE_SCANNING = "scanning"
 _FILE_INDEX_STAGE_PARSING = "parsing"
 _FILE_INDEX_STAGE_EMBEDDING = "embedding"
 _FILE_INDEX_STAGE_STORING = "storing"
+_FILE_INDEX_NO_PARSEABLE_SAMPLE_LIMIT = 5
+_FILE_INDEX_NO_PARSEABLE_EXAMPLE_OUTPUT_LIMIT = 3
 
 
 class _FileIndexProgressReporter:
@@ -637,6 +660,12 @@ class _FileIndexProgressReporter:
         _FILE_INDEX_STAGE_PARSING: "Parsing",
         _FILE_INDEX_STAGE_EMBEDDING: "Embedding",
         _FILE_INDEX_STAGE_STORING: "Storing",
+    }
+    _HIDE_WHEN_COMPLETE = {
+        _FILE_INDEX_STAGE_SCANNING,
+        _FILE_INDEX_STAGE_PARSING,
+        _FILE_INDEX_STAGE_EMBEDDING,
+        _FILE_INDEX_STAGE_STORING,
     }
 
     def __init__(self, *, output_console: Any) -> None:
@@ -699,6 +728,7 @@ class _FileIndexProgressReporter:
         if total is not None:
             self._completed[stage] = total
         self._sync(stage, force_emit=True)
+        self._hide_if_complete(stage)
 
     def _sync(self, stage: str, *, force_emit: bool = False) -> None:
         if self._interactive and self._progress is not None:
@@ -725,6 +755,16 @@ class _FileIndexProgressReporter:
                 total=self._totals[stage],
                 description=self._status_line(stage),
             )
+
+    def _hide_if_complete(self, stage: str) -> None:
+        if not self._interactive or self._progress is None:
+            return
+        if stage not in self._HIDE_WHEN_COMPLETE:
+            return
+        task_id = self._task_ids.get(stage)
+        if task_id is None:
+            return
+        self._progress.update(task_id, visible=False)
 
     def _sync_non_interactive(self, stage: str, *, force_emit: bool) -> None:
         status = self._status_line(stage)
@@ -1411,8 +1451,16 @@ def index_files(  # noqa: PLR0912
         "--incremental/--no-incremental",
         help="Enable/disable incremental indexing (skip unchanged files)",
     ),
+    force_full: bool = typer.Option(
+        False,
+        "--force-full",
+        help="Force full file re-index (equivalent to --no-incremental)",
+    ),
 ) -> None:
     """Bulk-index .py, .md, and .rst files from a directory."""
+    if force_full:
+        incremental = False
+
     # Validate path first (before services)
     index_path = Path(path).resolve()
     if not index_path.exists():
@@ -1533,6 +1581,8 @@ def index_files(  # noqa: PLR0912
 
             indexed_count = 0
             skipped_count = 0
+            no_parseable_count = 0
+            no_parseable_samples: list[str] = []
 
             try:
                 work_items = build_file_work_items(files_to_process)
@@ -1599,9 +1649,9 @@ def index_files(  # noqa: PLR0912
 
                     if not parsed_result.chunks:
                         skipped_count += 1
-                        error_console.print(
-                            f"[yellow]Skipped {file}: no parseable content[/yellow]"
-                        )
+                        no_parseable_count += 1
+                        if len(no_parseable_samples) < _FILE_INDEX_NO_PARSEABLE_SAMPLE_LIMIT:
+                            no_parseable_samples.append(str(file))
                         _preserve_previous_file_state(
                             incremental=incremental,
                             state=file_state_entry,
@@ -1646,9 +1696,9 @@ def index_files(  # noqa: PLR0912
 
                     if indexed_chunk_count <= 0:
                         skipped_count += 1
-                        error_console.print(
-                            f"[yellow]Skipped {file_state_entry.file_path}: no parseable content[/yellow]"
-                        )
+                        no_parseable_count += 1
+                        if len(no_parseable_samples) < _FILE_INDEX_NO_PARSEABLE_SAMPLE_LIMIT:
+                            no_parseable_samples.append(str(file_state_entry.file_path))
                         _preserve_previous_file_state(
                             incremental=incremental,
                             state=file_state_entry,
@@ -1723,6 +1773,24 @@ def index_files(  # noqa: PLR0912
         )
     else:
         console.print(f"[green]Indexed {indexed_count} files[/green]")
+    if no_parseable_count > 0:
+        console.print(
+            f"[dim]Suppressed {no_parseable_count} per-file 'no parseable content' messages.[/dim]"
+        )
+        if no_parseable_samples:
+            console.print(
+                "[dim]Examples: "
+                + ", ".join(
+                    no_parseable_samples[:_FILE_INDEX_NO_PARSEABLE_EXAMPLE_OUTPUT_LIMIT]
+                )
+                + (
+                    " ..."
+                    if len(no_parseable_samples)
+                    > _FILE_INDEX_NO_PARSEABLE_EXAMPLE_OUTPUT_LIMIT
+                    else ""
+                )
+                + "[/dim]"
+            )
 
 
 def _run_commit_index(  # noqa: PLR0912, PLR0913
@@ -1774,6 +1842,9 @@ def _run_commit_index(  # noqa: PLR0912, PLR0913
     last_indexed = None
     if incremental and not force:
         last_indexed, _ = _load_index_state(state_file, repo_path)
+        if last_indexed is None:
+            # Bootstrap behavior: first incremental run indexes full history.
+            all_history = True
 
     # Get services
     svc = CLIServiceContext(ctx)
@@ -2064,11 +2135,21 @@ def index_commits(  # noqa: PLR0912, PLR0913
         "-f",
         help="Force re-index (in incremental mode: ignores last indexed state)",
     ),
+    force_full: bool = typer.Option(
+        False,
+        "--force-full",
+        help="Force full commit-history re-index (equivalent to --full and bypass incremental state)",
+    ),
 ) -> None:
     """Index git commits from a repository.
 
     Parses commit messages and diffs to create searchable commit history.
     """
+    if force_full:
+        all_history = True
+        incremental = False
+        force = True
+
     _run_commit_index(
         ctx, path, limit, all_history, batch_size, max_diff_size, incremental, force
     )
