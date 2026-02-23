@@ -150,19 +150,33 @@ def test_index_all_option_shows_in_help():
     assert "--all" in result.output
     # Should explain what --all does
     assert (
-        "all project files" in result.output.lower()
-        or "full repository" in result.output.lower()
+        "files and commit history" in result.output.lower()
+        or "files + commits" in result.output.lower()
     )
 
 
-def test_index_all_dispatches_to_index_files(monkeypatch):
-    """`te index --all` should route to index_files with default path."""
-    calls: list[tuple] = []
+def test_index_all_dispatches_to_files_and_commits(monkeypatch):
+    """`te index --all` should route to both file and commit indexing."""
+    file_calls: list[tuple] = []
+    commit_calls: list[tuple] = []
 
-    def fake_index_files(ctx, path, exclude=None) -> None:
-        calls.append((path, exclude))
+    def fake_index_files(ctx, path, exclude=None, incremental=True, force_full=False) -> None:
+        _ = ctx
+        file_calls.append((path, exclude, incremental, force_full))
+
+    def fake_index_commits(*args, **kwargs) -> None:
+        _ = args
+        commit_calls.append(
+            (
+                kwargs.get("path", "."),
+                kwargs.get("all_history", False),
+                kwargs.get("incremental", True),
+                kwargs.get("force_full", False),
+            )
+        )
 
     monkeypatch.setattr(cli, "index_files", fake_index_files)
+    monkeypatch.setattr(cli, "index_commits", fake_index_commits)
 
     result = runner.invoke(
         cli.app,
@@ -170,10 +184,40 @@ def test_index_all_dispatches_to_index_files(monkeypatch):
     )
 
     assert result.exit_code == 0
-    # Should call index_files with default path "."
-    assert len(calls) == 1
-    assert calls[0][0] == "."
-    assert calls[0][1] is None
+    assert len(file_calls) == 1
+    assert file_calls[0] == (".", None, True, False)
+    assert len(commit_calls) == 1
+    assert commit_calls[0] == (".", False, True, False)
+
+
+def test_index_all_force_full_dispatches_to_files_and_commits(monkeypatch):
+    """`te index --all --force-full` should force full reindex for files and commits."""
+    file_calls: list[tuple] = []
+    commit_calls: list[tuple] = []
+
+    def fake_index_files(ctx, path, exclude=None, incremental=True, force_full=False) -> None:
+        _ = ctx
+        file_calls.append((path, exclude, incremental, force_full))
+
+    def fake_index_commits(*args, **kwargs) -> None:
+        _ = args
+        commit_calls.append(
+            (
+                kwargs.get("path", "."),
+                kwargs.get("all_history", False),
+                kwargs.get("incremental", True),
+                kwargs.get("force_full", False),
+            )
+        )
+
+    monkeypatch.setattr(cli, "index_files", fake_index_files)
+    monkeypatch.setattr(cli, "index_commits", fake_index_commits)
+
+    result = runner.invoke(cli.app, ["index", "--all", "--force-full"])
+
+    assert result.exit_code == 0
+    assert file_calls == [(".", None, False, True)]
+    assert commit_calls == [(".", True, False, True)]
 
 
 def test_index_all_rejected_with_subcommand(monkeypatch):
@@ -181,9 +225,9 @@ def test_index_all_rejected_with_subcommand(monkeypatch):
     file_calls: list[tuple] = []
     commit_calls: list[tuple] = []
 
-    def fake_index_files(ctx, path, exclude=None) -> None:
+    def fake_index_files(ctx, path, exclude=None, incremental=True, force_full=False) -> None:
         _ = ctx
-        file_calls.append((path, exclude))
+        file_calls.append((path, exclude, incremental, force_full))
 
     def fake_run_commit_index(*args) -> None:
         _ = args
@@ -400,8 +444,8 @@ def test_commit_index_keeps_failed_commits_retryable(monkeypatch, tmp_path):
     assert "c2" in controller.indexed_hashes
 
 
-def test_commit_index_respects_limit_without_all(monkeypatch, tmp_path):
-    """Default behavior should honor --limit when --all is not set."""
+def test_commit_index_bootstraps_full_history_without_existing_state(monkeypatch, tmp_path):
+    """First incremental commit index run should bootstrap full history (ignore --limit)."""
     repo_path = tmp_path / "repo"
     (repo_path / ".git").mkdir(parents=True)
     data_dir = tmp_path / "data"
@@ -428,7 +472,7 @@ def test_commit_index_respects_limit_without_all(monkeypatch, tmp_path):
         ["index", "commits", "--repo", str(repo_path), "--limit", str(_TEST_LIMIT)],
     )
     assert result.exit_code == 0
-    assert len(controller.indexed_hashes) == _TEST_LIMIT
+    assert len(controller.indexed_hashes) == len(commits)
 
 
 def test_commit_index_advances_state_when_sentinel_found_after_pagination(
