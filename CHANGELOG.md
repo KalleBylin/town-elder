@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.3.0](https://github.com/KalleBylin/town-elder/compare/v0.2.1...v0.3.0) (2026-02-23)
+
+
+### Features
+
+* **config:** add embed_backend config for embedding backend selection ([1a3f621](https://github.com/KalleBylin/town-elder/commit/1a3f62157ca5f575c8bc52e896c6f058d582c424))
+* **embedder:** expose Rust embedding API via PyO3 _te_core module ([d1205da](https://github.com/KalleBylin/town-elder/commit/d1205da6b882326a8f92ad77cb29ad15c5642171))
+* **embeddings:** add BAAI/Xenova model alias normalization ([3f51268](https://github.com/KalleBylin/town-elder/commit/3f51268ef74309e4ae9f901c0801df7c8ca1c233))
+* **embeddings:** add pluggable backend support to Embedder class ([7979edd](https://github.com/KalleBylin/town-elder/commit/7979edd93685e39dd4fff97a0acdeb6e8ccaf5f8))
+* **embeddings:** add Rust embedding adapter and CI smoke tests ([2be8f76](https://github.com/KalleBylin/town-elder/commit/2be8f76cc275eacc9fa620ab6227cba0aaa3caf8))
+* finalize embedding migration with dependency cleanup and docs ([a0d9fbd](https://github.com/KalleBylin/town-elder/commit/a0d9fbd94c5ccd2cdeb4d68cd6833d1da38fb547))
+* **interop:** define Rust shared-core contract and parity fixtures ([c768ae2](https://github.com/KalleBylin/town-elder/commit/c768ae2577cc418d3dd8e74b9985d84852067858))
+* **native-cli:** add te-rs indexing workflow ([7c6080b](https://github.com/KalleBylin/town-elder/commit/7c6080b79d9ba6c832b3f25e6d8f756e17187bfb))
+* **python:** add Rust adapter with feature-flagged fallback boundary ([7f40850](https://github.com/KalleBylin/town-elder/commit/7f408502485e9734f28b8f6144ef2a86861e126a))
+* **rust-core:** add scanner and helper parity wiring ([6915d78](https://github.com/KalleBylin/town-elder/commit/6915d78cc83e892e1db6bc77b23f1fdac427326f))
+* **rust:** add backend abstraction and zvec feasibility spike ([ab57a6a](https://github.com/KalleBylin/town-elder/commit/ab57a6a3bd002a08b2a3b9c3fed062ded9b7a49b))
+* **rust:** bootstrap Rust workspace with PyO3 and clap scaffolding ([9411a07](https://github.com/KalleBylin/town-elder/commit/9411a0771f7583160008d286e0a499d970cec02e))
+* **rust:** port commit-log and diff-text primitives to te-core ([72f09e5](https://github.com/KalleBylin/town-elder/commit/72f09e52da437cb458ad07a59cb23bdfbf056a9c))
+* **rust:** port deterministic doc-id and file-state helpers to te-core ([5d78755](https://github.com/KalleBylin/town-elder/commit/5d78755b0d90364dbd9750b4c22b0039bd9a0f2a))
+* **rust:** port git blob and diff parsing primitives to te-core ([061ce28](https://github.com/KalleBylin/town-elder/commit/061ce28c4a347149ebf0a72bbd7d691b0a8c5dce))
+* **rust:** port RST chunk and metadata extraction to te-core ([c5e8e5a](https://github.com/KalleBylin/town-elder/commit/c5e8e5a95e45ddf1835dc0805d88a502f8d16ad7))
+* **rust:** wire Rust path into te index commits behind feature flag ([3c11b07](https://github.com/KalleBylin/town-elder/commit/3c11b07a7bcd11584f29c1ab58bc4194187e7733))
+
+
+### Bug Fixes
+
+* **ci:** correct rust artifact smoke test script ([beda327](https://github.com/KalleBylin/town-elder/commit/beda32709ee3ba4dda942d19bd4eb0580045ffa6))
+* **ci:** fix YAML syntax in smoke test script ([9d0e7bf](https://github.com/KalleBylin/town-elder/commit/9d0e7bfd90fcf4801c1d00cc0804cb3a03dcb5d7))
+* **ci:** pass explicit interpreter to maturin wheel builds ([4360ce2](https://github.com/KalleBylin/town-elder/commit/4360ce2796f8bd174184522b052c863af7b81af4))
+* **ci:** restore smoke-test checkout and pin uv ([6d34fad](https://github.com/KalleBylin/town-elder/commit/6d34fad50f9364548851c542f4b7088b4691435e))
+* **ci:** skip uv lock check on release-please PRs ([0aded5b](https://github.com/KalleBylin/town-elder/commit/0aded5b979e4cb9f60151faac9ee4b8bbc047aa6))
+* **ci:** use dynamic model selection in smoke tests and docs ([8269ac1](https://github.com/KalleBylin/town-elder/commit/8269ac1eed16f65a7e4e4a5b830f9010faffc1fa))
+* **cli:** avoid false stale commit warning on branch divergence ([be4d182](https://github.com/KalleBylin/town-elder/commit/be4d182d78410ee0d8fb9407f3e7fff0007c57c9))
+* **embeddings:** improve exception contracts and add fallback diagnostics ([57c19e9](https://github.com/KalleBylin/town-elder/commit/57c19e9157f7ab99da17c2321f4eec5ae752c7b8))
+* **git:** ignore local daemon and fastembed cache artifacts ([7763602](https://github.com/KalleBylin/town-elder/commit/77636022055aee149894c5cc96e56e235ae534ff))
+* **packaging:** unify rust pyproject and CI maturin pathing ([dc83854](https://github.com/KalleBylin/town-elder/commit/dc83854d415fb8c82b2bb358a6dfa37f24627409))
+* **rust:** align core package and module naming ([7f00161](https://github.com/KalleBylin/town-elder/commit/7f001619223a5e8c27a230928e615935eb2373a7))
+* **rust:** restore PyO3 gating and packaging wiring ([7de1a9e](https://github.com/KalleBylin/town-elder/commit/7de1a9e534b0958c2e1f270053428efef388c219))
+* **rust:** use rustls features for fastembed downloads ([66f6fda](https://github.com/KalleBylin/town-elder/commit/66f6fdaacccf5d6523de96969a1226051166d7fc))
+
+
+### Performance Improvements
+
+* **benchmark:** add rust rollout comparison harness ([4f50afc](https://github.com/KalleBylin/town-elder/commit/4f50afc35ae8f2d36b320cb5a0f8dd9dc71aef20))
+
+
+### Documentation
+
+* define Rust embedding distribution strategy ([f621428](https://github.com/KalleBylin/town-elder/commit/f621428df41159cc05ec81af47db512cb0913ef9))
+
 ## [0.3.0](https://github.com/KalleBylin/town-elder/compare/v0.2.1...v0.3.0) (TBD)
 
 
