@@ -2,12 +2,14 @@
 requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
+# Single source of truth for building the PyO3 extension from `rust/`.
+# Version is sourced from Cargo metadata (workspace.package.version) to avoid drift.
 [project]
-name = "town-elder-te-core"
-version = "0.1.0"
+name = "town-elder-core"
+dynamic = ["version"]
 
 [tool.maturin]
 manifest-path = "src/Cargo.toml"
 features = ["python"]
-module-name = "town_elder._te_core"
+module-name = "town_elder._core"
 python-source = "../src"

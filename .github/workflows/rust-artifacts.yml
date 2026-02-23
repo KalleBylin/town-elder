@@ -86,8 +86,9 @@ jobs:
       - name: Build wheel via maturin
         uses: PyO3/maturin-action@v1
         with:
+          working-directory: rust
           command: build
-          args: --manifest-path rust/src/Cargo.toml --release --features python --out dist ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+          args: --release --out ../dist ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '--zig' || '' }}
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v5
@@ -114,8 +115,9 @@ jobs:
       - name: Build sdist via maturin
         uses: PyO3/maturin-action@v1
         with:
+          working-directory: rust
           command: sdist
-          args: --manifest-path rust/src/Cargo.toml --out dist
+          args: --out ../dist
 
       - name: Upload sdist artifact
         uses: actions/upload-artifact@v5
