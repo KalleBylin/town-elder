@@ -43,7 +43,7 @@ jobs:
         run: uv python install "$(cat .python-version)"
 
       - name: Verify lockfile is up-to-date for publishable metadata
-        if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')) }}
+        if: ${{ !((github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'release-please--branches--main'))) }}
         run: uv lock --check --no-sources
 
       - name: Build wheel and sdist
