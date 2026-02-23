@@ -4,7 +4,6 @@ build-backend = "maturin"
 
 [project]
 name = "town-elder-te-core"
-version = "0.1.0"
 
 [tool.maturin]
 manifest-path = "Cargo.toml"

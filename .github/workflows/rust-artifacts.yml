@@ -9,14 +9,97 @@ on:
     types: [published]
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   wheels:
-    name: Build te-core wheel (${{ matrix.os }})
+    name: Build te-core wheel (${{ matrix.os }}-${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            python: "3.10"
+            artifact_target: x86_64
+          - os: ubuntu-latest
+            python: "3.11"
+            artifact_target: x86_64
+          - os: ubuntu-latest
+            python: "3.12"
+            artifact_target: x86_64
+          # Linux ARM64
+          - os: ubuntu-latest
+            python: "3.10"
+            target: aarch64-unknown-linux-gnu
+            artifact_target: aarch64
+          - os: ubuntu-latest
+            python: "3.11"
+            target: aarch64-unknown-linux-gnu
+            artifact_target: aarch64
+          - os: ubuntu-latest
+            python: "3.12"
+            target: aarch64-unknown-linux-gnu
+            artifact_target: aarch64
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            python: "3.11"
+            artifact_target: arm64
+          - os: macos-latest
+            python: "3.12"
+            artifact_target: arm64
+          # macOS x86_64 (Intel)
+          - os: macos-13
+            python: "3.10"
+            artifact_target: x86_64
+          - os: macos-13
+            python: "3.11"
+            artifact_target: x86_64
+          - os: macos-13
+            python: "3.12"
+            artifact_target: x86_64
+          # Windows x64
+          - os: windows-latest
+            python: "3.10"
+            artifact_target: x86_64
+          - os: windows-latest
+            python: "3.11"
+            artifact_target: x86_64
+          - os: windows-latest
+            python: "3.12"
+            artifact_target: x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target || '' }}
+
+      - name: Build wheel via maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --manifest-path rust/src/Cargo.toml --release --features python --out dist ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: te-core-wheel-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.artifact_target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  # Build source distribution (only once, on ubuntu-latest with default Python)
+  sdist:
+    name: Build te-core sdist
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -28,39 +111,51 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build wheel via maturin
+      - name: Build sdist via maturin
         uses: PyO3/maturin-action@v1
         with:
-          command: build
-          args: --manifest-path rust/src/Cargo.toml --release --features python --out dist
+          command: sdist
+          args: --manifest-path rust/src/Cargo.toml --out dist
 
-      - name: Upload wheel artifact
+      - name: Upload sdist artifact
         uses: actions/upload-artifact@v5
         with:
-          name: te-core-wheel-${{ matrix.os }}
-          path: dist/*.whl
+          name: te-core-sdist
+          path: dist/*.tar.gz
           if-no-files-found: error
 
   smoke-test:
-    name: Smoke test (${{ matrix.os }})
+    name: Smoke test (${{ matrix.os }}-${{ matrix.python }})
     needs: wheels
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            python: "3.12"
+            target: x86_64
+          - os: macos-latest
+            python: "3.12"
+            target: arm64
+          - os: macos-13
+            python: "3.12"
+            target: x86_64
+          - os: windows-latest
+            python: "3.12"
+            target: x86_64
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v5
         with:
-          name: te-core-wheel-${{ matrix.os }}
+          name: te-core-wheel-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.target }}
           path: dist
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version-file: .python-version
+          python-version: ${{ matrix.python }}
 
       - name: Install wheel and test
         shell: bash
@@ -147,3 +242,71 @@ jobs:
           path: |
             dist/te-rs-*.tar.gz
           if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: [wheels, sdist]
+    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v') && github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/town-elder-te-core/
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: te-core-wheel-*
+          path: dist-flat
+          merge-multiple: true
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: te-core-sdist
+          path: dist-flat
+
+      - name: Inspect publish artifacts
+        shell: bash
+        run: |
+          ls -la dist-flat/
+          ls dist-flat/*.whl
+          ls dist-flat/*.tar.gz
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.21"
+
+      - name: Verify release tag matches version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          # Extract version from the first wheel filename
+          WHEEL=$(ls dist-flat/*.whl | head -1)
+          if [ -z "$WHEEL" ]; then
+            echo "No wheel found"
+            exit 1
+          fi
+          # Extract version from wheel name: town_elder_te_core-0.1.0-*.whl
+          WHEEL_VERSION=$(echo "$WHEEL" | sed -E 's/.*town_elder_te_core-([0-9.]+)-.*/\1/')
+          TAG_VERSION="${RELEASE_TAG#v}"
+
+          echo "Wheel version: $WHEEL_VERSION"
+          echo "Tag version: $TAG_VERSION"
+
+          if [ "$WHEEL_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: wheel=$WHEEL_VERSION, tag=$TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Generate artifact attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist-flat/*"
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/ dist-flat/*

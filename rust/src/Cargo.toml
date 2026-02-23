@@ -5,6 +5,9 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[package.metadata]
+maturin = { name = "town-elder-te-core" }
+
 [[bin]]
 name = "te-rs"
 path = "main.rs"
