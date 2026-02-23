@@ -88,7 +88,7 @@ jobs:
         with:
           working-directory: rust
           command: build
-          args: --release --out ../dist ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '--zig' || '' }}
+          args: --release -i ${{ startsWith(matrix.os, 'windows') && 'python' || format('python{0}', matrix.python) }} --out ../dist ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '--zig' || '' }}
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v5
